@@ -16,10 +16,15 @@ enum Phase { IDLE, AIMING, FLYING, RESULT, OVER }
 
 const RESULT_PAUSE := 1.6
 const BOT_THINK := 2.0
+const MAX_SHOT_LAG := 0.5   ## s: how far back a client may date its shot (it sees the turn late)
 const GLYPH := {1: "X", 2: "O"}
-## Launch sound per ammo type: normal, erase, steer (files in assets/audio/).
-const LAUNCH_SFX := ["launch", "launch_erase", "launch_steer"]
+## Launch sound per ammo type: normal, erase, steer, freeze (files in assets/audio/).
+const LAUNCH_SFX := ["launch", "launch_erase", "launch_steer", "launch_freeze"]
 const NOTICE_START := "Chọn vị trí. Căn gió. Bắn."
+const AMMO_NOTICES := [NOTICE_START,
+	"Đạn tẩy: bắn trúng dấu của đối thủ để xóa nó.",
+	"Đạn đuổi: sau khi bắn, di chuột để kéo rocket tới ô muốn trúng.",
+	"Đạn băng: trúng bàn cờ là bàn đứng yên ngay tại tư thế đó trong %d lượt."]
 
 var mode := Mode.BOT
 var phase := Phase.IDLE
@@ -67,9 +72,12 @@ var _next_capture_try := 0   ## web: earliest tick (ms) for the next pointer-loc
 var _no_mouse := false   ## test only: never capture the mouse (a real mouse would steer the camera)
 var _force_tilt := Vector2(INF, INF)   ## test only (--tilt=lean,twist)
 var selected_ammo := Rules.AMMO_NORMAL
-var _used := {1: [false, false, false], 2: [false, false, false]}   ## specials spent this match
+var _used := _fresh_used()   ## team -> [ammo] = special spent this match
 var _pending_ammo := Rules.AMMO_NORMAL
 var _last_ammo := Rules.AMMO_NORMAL
+var _last_blast := ""
+var _frozen_left := 0          ## authority: turns of freeze still to come
+var skins := {1: Skins.defaults(), 2: Skins.defaults()}   ## team -> loadout (marks, blasts, trails)
 var _live: Dictionary = {}              ## authority: guided flight in progress
 var _steer_target := Vector3.ZERO       ## authority: world point the guided rocket chases
 var _steer_live := false                ## every peer: a guided rocket is in the air
@@ -79,6 +87,7 @@ var _steer_send := 0.0
 var _auto_target := Vector3(INF, INF, INF)
 var _slots := {1: 0, 2: 0}        ## server: team -> peer id
 var _slot_names := {1: "", 2: ""}
+var _slot_skins := {1: Skins.defaults(), 2: Skins.defaults()}
 var _reserved := {}               ## server: peers told to join but not yet seated
 var _room_label := ""           ## client: name of the room we are in
 
@@ -130,6 +139,7 @@ func bind_ui(u: Ui) -> void:
 			srv_rematch.rpc_id(1)
 		else:
 			_auth_begin_match())
+	ui.skins_changed.connect(func() -> void: world.set_board_skin(Prefs.skins["board"]))
 
 
 ## Developer shortcuts for scripted multi-process tests (pass after `--`).
@@ -187,6 +197,8 @@ func _start_offline(m: Mode) -> void:
 	my_team = 1
 	names = {1: Loc.t("Bạn"), 2: "Bot"} if m == Mode.BOT else {1: Loc.t("Đội X"), 2: Loc.t("Đội O")}
 	difficulty = Prefs.difficulty
+	# Two players on one machine share one loadout; the bot dresses up at random.
+	skins = {1: Prefs.skins.duplicate(), 2: Skins.random(_rng) if m == Mode.BOT else Prefs.skins.duplicate()}
 	_auth_begin_match()
 
 
@@ -214,7 +226,7 @@ func enter_room(id: int) -> void:
 	room_id = id
 	name = "Room_%d" % id
 	my_team = 0
-	srv_hello.rpc_id(1, Net.player_name)
+	srv_hello.rpc_id(1, Net.player_name, Prefs.skins)
 
 
 ## Client: back to the room list without dropping the connection.
@@ -324,7 +336,7 @@ func room_info() -> Dictionary:
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func srv_hello(guest_name: String) -> void:
+func srv_hello(guest_name: String, loadout: Dictionary) -> void:
 	if not server_only:
 		return
 	var id := multiplayer.get_remote_sender_id()
@@ -343,10 +355,12 @@ func srv_hello(guest_name: String) -> void:
 	_slot_names[t] = guest_name.strip_edges().substr(0, 16)
 	if _slot_names[t] == "":
 		_slot_names[t] = GLYPH[t]
+	_slot_skins[t] = Skins.sanitize(loadout)
 	_log("room %d: %s joined as team %d" % [room_id, _slot_names[t], t])
 	net_assign.rpc_id(id, t)
 	if _slots[3 - t] != 0:
 		names = {1: _slot_names[1], 2: _slot_names[2]}
+		skins = {1: _slot_skins[1], 2: _slot_skins[2]}
 		_auth_begin_match()
 	else:
 		net_wait.rpc_id(id, "Phòng «%s». Bạn là đội %s. Đang chờ đối thủ vào phòng…", [_room_title(), GLYPH[t]])
@@ -406,26 +420,48 @@ func net_reject(message: String) -> void:
 
 
 func _auth_begin_match() -> void:
-	_bcast(&"net_new_match", [names[1], names[2], difficulty])
+	_frozen_left = 0
+	_bcast(&"net_new_match", [names[1], names[2], difficulty, skins])
 	_auth_start_turn(1)
 
 
 func _auth_start_turn(t: int) -> void:
-	var rolled := Rules.roll_env(difficulty, _rng, t, env, board_time)
+	var frozen := _frozen_left
+	_frozen_left = maxi(0, _frozen_left - 1)
+	var rolled := Rules.roll_env(difficulty, _rng, t, env, board_time, frozen)
 	if _force_tilt.is_finite():
 		rolled["tilt"] = _force_tilt
 	_bcast(&"net_turn", [t, rolled])
 
 
+static func _fresh_used() -> Dictionary:
+	var none := []
+	none.resize(Rules.AMMO_COUNT)
+	none.fill(false)
+	return {1: none.duplicate(), 2: none.duplicate()}
+
+
+## Whether team t may fire this ammo right now. The freeze rocket only exists on a tumbling
+## board, and only while it is not already frozen.
+func _ammo_ok(t: int, ammo: int) -> bool:
+	if ammo == Rules.AMMO_NORMAL:
+		return true
+	if ammo < 0 or ammo >= Rules.AMMO_COUNT or _used[t][ammo]:
+		return false
+	if ammo == Rules.AMMO_FREEZE:
+		return env["spin"] and int(env["frozen"]) == 0
+	return true
+
+
 func _on_ammo_selected(index: int) -> void:
 	if phase != Phase.AIMING or not _local_controls(team):
 		return
-	if index != Rules.AMMO_NORMAL and _used[team][index]:
+	if not _ammo_ok(team, index):
 		return
 	selected_ammo = index
-	notice = [Loc.t(NOTICE_START),
-		Loc.t("Đạn tẩy: bắn trúng dấu của đối thủ để xóa nó."),
-		Loc.t("Đạn đuổi: sau khi bắn, di chuột để kéo rocket tới ô muốn trúng.")][index]
+	notice = Loc.t(AMMO_NOTICES[index])
+	if index == Rules.AMMO_FREEZE:
+		notice = notice % Rules.FREEZE_TURNS
 
 
 func _on_fire_requested(origin: Vector3, dir: Vector3) -> void:
@@ -436,17 +472,19 @@ func _on_fire_requested(origin: Vector3, dir: Vector3) -> void:
 	if is_host:
 		_auth_fire(team, origin, dir, selected_ammo)
 	else:
-		srv_fire.rpc_id(1, origin, dir, selected_ammo)
+		srv_fire.rpc_id(1, origin, dir, selected_ammo, _turn_age)
 
 
+## age: how far into the turn the client fired. A shooter circling the board fires from where
+## they were at that moment, which the server can work out itself (Rules.shooter_pos).
 @rpc("any_peer", "call_remote", "reliable")
-func srv_fire(origin: Vector3, dir: Vector3, ammo: int) -> void:
+func srv_fire(origin: Vector3, dir: Vector3, ammo: int, age: float) -> void:
 	if not server_only:
 		return
 	var sender := multiplayer.get_remote_sender_id()
 	var t := 1 if _slots[1] == sender else (2 if _slots[2] == sender else 0)
 	if t != 0:
-		_auth_fire(t, origin, dir, ammo)
+		_auth_fire(t, origin, dir, ammo, age)
 
 
 @rpc("any_peer", "call_remote", "unreliable")
@@ -463,14 +501,15 @@ func _set_steer(point: Vector3) -> void:
 		_steer_target = Vector3(clampf(point.x, -120.0, 120.0), clampf(point.y, -10.0, 160.0), clampf(point.z, -60.0, 60.0))
 
 
-func _auth_fire(t: int, origin: Vector3, dir: Vector3, ammo: int = Rules.AMMO_NORMAL) -> void:
+func _auth_fire(t: int, origin: Vector3, dir: Vector3, ammo: int = Rules.AMMO_NORMAL, age: float = -1.0) -> void:
 	if phase != Phase.AIMING or t != team or dir.length() < 0.1 or not is_finite(dir.length()) or not origin.is_finite():
 		return
-	if ammo < 0 or ammo > Rules.AMMO_STEER or (ammo != Rules.AMMO_NORMAL and _used[t][ammo]):
+	if not _ammo_ok(t, ammo):
 		ammo = Rules.AMMO_NORMAL
-	var side := 1.0 if t == 1 else -1.0
-	# Nobody can walk: the shot always leaves from the player's fixed spot, whatever the client sent.
-	origin = Vector3(0.0, Rules.EYE_HEIGHT, side * float(env["start_z"]))
+	# Nobody can walk: the shot always leaves from where the rules put the player, whatever the
+	# client sent. A client sees each turn a little late, so it may date its shot back a bit.
+	var at := _turn_age if (age < 0.0 or not is_finite(age)) else clampf(age, _turn_age - MAX_SHOT_LAG, _turn_age)
+	origin = Rules.shooter_pos(env, t, at)
 	_pending_ammo = ammo
 	if ammo == Rules.AMMO_STEER:
 		_live = Rules.begin_flight(origin, dir, board_time)
@@ -495,6 +534,11 @@ func _auth_finish_turn(res: Dictionary) -> void:
 	var flat := PackedInt32Array()
 	if _pending_ammo == Rules.AMMO_ERASE and (kind == "placed" or kind == "occupied"):
 		kind = "erased" if (kind == "occupied" and board[r * Rules.N + c] != team) else "erase_miss"
+	elif _pending_ammo == Rules.AMMO_FREEZE and (kind == "placed" or kind == "occupied"):
+		# The board stops exactly as it was when the rocket struck it; no mark is placed.
+		kind = "frozen"
+		_frozen_left = Rules.FREEZE_TURNS
+		_bcast(&"net_freeze", [Rules.board_angles(env, float(res.get("tau", board_time)))])
 	_live = {}
 	_pending_ammo = Rules.AMMO_NORMAL
 	if kind == "placed":
@@ -518,34 +562,36 @@ func _autoplay_fire() -> bool:
 		var cell := Rules.bot_pick_target(board, mark_count, team, _rng)
 		var ammo := Rules.AMMO_NORMAL
 		if mark_count >= 2:
-			if not _used[team][Rules.AMMO_ERASE]:
+			if _ammo_ok(team, Rules.AMMO_ERASE):
 				for i in board.size():
 					if board[i] == 3 - team:
 						cell = Vector2i(i / Rules.N, i % Rules.N)
 						ammo = Rules.AMMO_ERASE
 						break
-			elif not _used[team][Rules.AMMO_STEER]:
+			elif _ammo_ok(team, Rules.AMMO_FREEZE):
+				ammo = Rules.AMMO_FREEZE
+			elif _ammo_ok(team, Rules.AMMO_STEER):
 				ammo = Rules.AMMO_STEER
 		_auto_plan = {"cell": cell, "ammo": ammo}
 	var cell: Vector2i = _auto_plan["cell"]
 	var ammo: int = _auto_plan["ammo"]
 	selected_ammo = ammo
-	var origin := rig.position
+	# Where the rules have us standing at this very moment (we may be circling the board).
+	var origin := Rules.shooter_pos(env, team, _turn_age)
 	if ammo == Rules.AMMO_STEER:
 		# A guided shot starts off-line on purpose; the steering has to pull it onto the target.
 		_auto_target = Rules.cell_world(cell.x, cell.y, _xf())
 		_on_fire_requested(origin, (_auto_target - origin).normalized())
 		return true
-	var expect := "occupied" if ammo == Rules.AMMO_ERASE else "placed"
 	var first := Vector3.ZERO
 	for cand in Rules.aim_candidates(origin, cell, env, board_time):
 		if first == Vector3.ZERO:
 			first = cand["dir"]
 		var probe := Rules.simulate_shot(origin, cand["dir"], env, board, obstacles, board_time)
-		if probe["kind"] == expect and probe["r"] == cell.x and probe["c"] == cell.y:
+		if _shot_does(probe, cell, ammo):
 			_on_fire_requested(origin, cand["dir"])
 			return true
-	if env["spin"] and time_left > 2.5:
+	if _waits_for_moment() and time_left > 2.5:
 		return false   # wait for a better moment
 	if first == Vector3.ZERO:
 		first = Rules.solve_aim_cell(origin, cell, env, board_time)["dir"]
@@ -569,63 +615,83 @@ func _bot_make_plan(for_team: int) -> Dictionary:
 			if not wins:
 				cell = threat
 				ammo = Rules.AMMO_ERASE
+	# Now and then, once the game is under way, the bot stops a tumbling board.
+	if ammo == Rules.AMMO_NORMAL and mark_count >= 4 and _ammo_ok(for_team, Rules.AMMO_FREEZE) and _rng.randf() < 0.3:
+		ammo = Rules.AMMO_FREEZE
 	var spread := 0.6 if _rng.randf() < 0.08 else 0.22   # the odd sloppy shot keeps the bot beatable
 	return {"cell": cell, "ammo": ammo, "next": 0.0,
 		"jitter": Vector2(_rng.randf_range(-spread, spread), _rng.randf_range(-spread, spread)) * Rules.CELL}
 
 
+## A simulated shot does what this ammo is for: a freeze rocket only has to hit the board.
+func _shot_does(probe: Dictionary, cell: Vector2i, ammo: int) -> bool:
+	if ammo == Rules.AMMO_FREEZE:
+		return probe["kind"] == "placed" or probe["kind"] == "occupied"
+	var expect := "occupied" if ammo == Rules.AMMO_ERASE else "placed"
+	return probe["kind"] == expect and probe["r"] == cell.x and probe["c"] == cell.y
+
+
+## A tumbling board, or a shooter circling a still one: the shot that works changes from moment
+## to moment, so it pays to wait for a good one.
+func _waits_for_moment() -> bool:
+	return env["spin"] or float(env["orbit"]) != 0.0
+
+
 ## Called every frame once the bot has "thought" long enough. On a still board it aims, checks
-## the shot by simulating it, and fires. On a tumbling board it checks every ~0.1 s and waits for
-## a moment when a shot really lands, firing a best guess only when time is nearly up.
-func _auth_bot_fire(for_team: int, base_origin: Vector3) -> void:
+## the shot by simulating it, and fires. When the good shot changes from moment to moment (a
+## tumbling board, or the bot circling the board) it checks every ~0.1 s and waits for a moment
+## when a shot really lands, firing a best guess only when time is nearly up.
+func _auth_bot_fire(for_team: int) -> void:
 	if _bot_plan.is_empty():
 		_bot_plan = _bot_make_plan(for_team)
 		if _bot_plan.is_empty():
 			_auth_finish_turn({"kind": "timeout"})
 			return
-	var spin: bool = env["spin"]
+	var waits := _waits_for_moment()
 	var now := Time.get_ticks_msec() / 1000.0
-	if spin and now < float(_bot_plan["next"]):
+	if waits and now < float(_bot_plan["next"]):
 		return
 	_bot_plan["next"] = now + 0.1
 	var cell: Vector2i = _bot_plan["cell"]
 	var ammo: int = _bot_plan["ammo"]
 	var jitter: Vector2 = _bot_plan["jitter"]
-	var expect := "occupied" if ammo == Rules.AMMO_ERASE else "placed"
-	var side := 1.0 if for_team == 1 else -1.0
+	var origin := Rules.shooter_pos(env, for_team, _turn_age)
 	var guess := {}
-	# Try a few firing spots so the bot can slip around trees and rocks.
-	for attempt in (1 if spin else 8):
-		var origin := Vector3(base_origin.x if attempt == 0 else _rng.randf_range(-60.0, 60.0), Rules.EYE_HEIGHT, side * absf(base_origin.z))
-		for cand in Rules.aim_candidates(origin, cell, env, board_time, jitter):
+	# On a still board, try a few nearby aim points so the bot can slip past trees and rocks.
+	for attempt in (1 if waits else 6):
+		var jit := jitter if attempt == 0 else Vector2(_rng.randf_range(-0.3, 0.3), _rng.randf_range(-0.3, 0.3)) * Rules.CELL
+		for cand in Rules.aim_candidates(origin, cell, env, board_time, jit):
 			if guess.is_empty():
-				guess = {"origin": origin, "dir": cand["dir"]}
+				guess = cand
 			var probe := Rules.simulate_shot(origin, cand["dir"], env, board, obstacles, board_time)
-			if probe["kind"] == expect and probe["r"] == cell.x and probe["c"] == cell.y:
+			if _shot_does(probe, cell, ammo):
 				_auth_fire(for_team, origin, cand["dir"], ammo)
 				return
-	if spin and time_left > 2.5:
+	if waits and time_left > 2.5:
 		return
 	if guess.is_empty():
-		var o := Vector3(base_origin.x, Rules.EYE_HEIGHT, side * absf(base_origin.z))
-		guess = {"origin": o, "dir": Rules.solve_aim_cell(o, cell, env, board_time, jitter)["dir"]}
-	_auth_fire(for_team, guess["origin"], guess["dir"], ammo)
+		guess = Rules.solve_aim_cell(origin, cell, env, board_time, jitter)
+	_auth_fire(for_team, origin, guess["dir"], ammo)
 
 
 # --- replicated events (run on every peer, including the host) ---------------------------------
 
 @rpc("authority", "call_remote", "reliable")
-func net_new_match(name_x: String, name_o: String, new_difficulty: int) -> void:
+func net_new_match(name_x: String, name_o: String, new_difficulty: int, new_skins: Dictionary) -> void:
 	names = {1: name_x, 2: name_o}
 	difficulty = new_difficulty
+	skins = {1: Skins.sanitize(new_skins.get(1)), 2: Skins.sanitize(new_skins.get(2))}
 	env = Rules.calm_env()
 	board_time = 0.0
 	_shot_slave = false
-	_used = {1: [false, false, false], 2: [false, false, false]}
+	_used = _fresh_used()
 	_clear_match()
 	if world != null:
 		world.set_spin_mode(false)
 		world.set_tilt(Vector2.ZERO, false)
+		world.set_frozen(false, false)
+		world.set_board_skin(Prefs.skins["board"])   # your own board, whatever the others chose
+		world.set_mark_styles(skins[1]["mark"], skins[2]["mark"])
 	phase = Phase.IDLE
 	get_tree().paused = false
 	if not server_only:
@@ -660,6 +726,7 @@ func net_turn(t: int, new_env: Dictionary) -> void:
 		_shot_slave = false
 	if world != null:
 		world.set_spin_mode(env["spin"])
+		world.set_frozen(int(env["frozen"]) > 0)
 		if not env["spin"]:
 			world.set_tilt(env["tilt"])
 	time_left = env["time"]
@@ -675,12 +742,16 @@ func net_turn(t: int, new_env: Dictionary) -> void:
 	phase = Phase.AIMING
 	notice = Loc.t(NOTICE_START)
 	var mine := _local_controls(t)
-	if mine and float(env["yaw_rate"]) != 0.0:
-		notice = Loc.t("Bạn đang bị xoay vòng! Kéo chuột ngược lại để giữ tâm ngắm vào bàn.")
+	if int(env["frozen"]) > 0:
+		notice = Loc.t("Bàn cờ đang đóng băng: còn %d lượt.") % int(env["frozen"])
+	elif mine and float(env["orbit"]) != 0.0:
+		notice = Loc.t("Bạn đang đi vòng quanh bàn cờ! Chờ lúc thuận lợi rồi bắn.")
 	if rig != null:
 		# Everyone starts the turn facing the board (watchers too: nobody can walk to look around).
-		rig.reset_for_turn(_view_team(t), _rest_xf(), env["start_z"])
-	_log("turn team=%d wind=%.2f tilt=(%.2f,%.2f) spin=%s omega=(%.2f,%.2f)" % [t, env["wind"], (env["tilt"] as Vector2).x, (env["tilt"] as Vector2).y, env["spin"], (env["omega"] as Vector2).x, (env["omega"] as Vector2).y])
+		# A shooter circling the board starts wherever the lap begins.
+		var view := _view_team(t)
+		rig.reset_for_turn(view, _rest_xf(), env["start_z"], Rules.shooter_azimuth(env, t, 0.0) if mine else NAN)
+	_log("turn team=%d wind=%.2f tilt=(%.2f,%.2f) spin=%s omega=(%.2f,%.2f) orbit=%.2f frozen=%d" % [t, env["wind"], (env["tilt"] as Vector2).x, (env["tilt"] as Vector2).y, env["spin"], (env["omega"] as Vector2).x, (env["omega"] as Vector2).y, env["orbit"], env["frozen"]])
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -696,6 +767,7 @@ func net_shot(t: int, ammo: int, path: PackedVector3Array, tau: float) -> void:
 		_shot_slave = not _steer_live
 	if ammo != Rules.AMMO_NORMAL:
 		_used[t][ammo] = true
+	_last_blast = skins[t]["blast"]
 	var mine := _local_controls(t)
 	notice = Loc.t("Đạn đuổi! Di chuột để lái rocket tới ô bạn muốn.") if (_steer_live and mine) else Loc.t("Rocket đang bay…")
 	_log("shot team=%d ammo=%d points=%d" % [t, ammo, path.size()])
@@ -705,6 +777,7 @@ func net_shot(t: int, ammo: int, path: PackedVector3Array, tau: float) -> void:
 		_rocket.queue_free()
 	_rocket = Rocket.new()
 	_rocket.ammo = ammo
+	_rocket.trail_id = skins[t]["trail"]
 	add_child(_rocket)
 	if _steer_live:
 		_rocket.begin_live(path[0])
@@ -723,6 +796,18 @@ func net_rocket(pos: Vector3, tau: float) -> void:
 		board_time = tau
 	if is_instance_valid(_rocket):
 		_rocket.push_live(pos)
+
+
+## A freeze rocket struck the tumbling board: it stops dead in the pose it had at that instant.
+@rpc("authority", "call_remote", "reliable")
+func net_freeze(theta: Vector2) -> void:
+	env["omega"] = Vector2.ZERO
+	env["theta0"] = theta
+	env["frozen"] = Rules.FREEZE_TURNS
+	_shot_slave = false
+	if world != null:
+		world.set_frozen(true)
+	_log("freeze at (%.2f, %.2f)" % [theta.x, theta.y])
 
 
 func _set_cell(r: int, c: int, value: int) -> void:
@@ -746,7 +831,7 @@ func _play(sfx_name: String, volume_db: float = -6.0) -> void:
 
 func _on_rocket_landed(pos: Vector3) -> void:
 	_shot_slave = false
-	world.spawn_explosion(pos, 1.0 if pos.y > 1.0 else 0.6, _last_ammo)
+	world.spawn_explosion(pos, 1.0 if pos.y > 1.0 else 0.6, _last_ammo, _last_blast)
 	_play("boom", -4.0)
 
 
@@ -774,6 +859,9 @@ func net_result(t: int, kind: String, r: int, c: int, win: int, flat: PackedInt3
 			_set_cell(r, c, 0)
 			_set_last(r, c)
 			notice = Loc.t("Đạn tẩy xóa dấu ở ô %s!") % _cell_text(t, r, c)
+			_play("mark")
+		"frozen":
+			notice = Loc.t("Đạn băng! Bàn cờ đóng băng trong %d lượt.") % Rules.FREEZE_TURNS
 			_play("mark")
 		"erase_miss":
 			last_cell = Vector2i(r, c)
@@ -860,7 +948,7 @@ func _tick(delta: float) -> void:
 			if time_left <= 0.0:
 				_auth_finish_turn({"kind": "timeout"})
 			elif mode == Mode.BOT and team == 2 and _turn_age >= BOT_THINK:
-				_auth_bot_fire(2, Vector3(0, 0, -float(env["start_z"])))
+				_auth_bot_fire(2)
 		Phase.FLYING:
 			if _steer_live and _local_controls(team):
 				_steer_send += delta
@@ -907,8 +995,10 @@ func _sync_input_and_hud() -> void:
 	if server_only:
 		return
 	rig.set_menu_mode(phase == Phase.IDLE)
-	# On the hardest level the player stands on a turntable for the whole of their turn.
-	rig.auto_yaw = float(env["yaw_rate"]) if (_local_controls(team) and (phase == Phase.AIMING or phase == Phase.FLYING)) else 0.0
+	# Very hard: the shooter rides round the board while aiming (and stops once the rocket is away).
+	var riding := float(env["orbit"]) != 0.0 and _local_controls(team) and phase == Phase.AIMING
+	if riding:
+		rig.ride(Rules.shooter_azimuth(env, team, _turn_age), float(env["start_z"]))
 	var overlay := ui.overlay_open()
 	rig.active = not overlay and phase != Phase.IDLE
 	var want := Input.MOUSE_MODE_VISIBLE if overlay or phase == Phase.IDLE or _no_mouse else Input.MOUSE_MODE_CAPTURED
@@ -930,34 +1020,39 @@ func _sync_input_and_hud() -> void:
 		title = (Loc.t("Lượt của bạn (%s)") % GLYPH[team]) if names[team] == Loc.t("Bạn") else (Loc.t("Lượt %s (%s)") % [names[team], GLYPH[team]])
 	ui.set_hud(title, Ui.COL_X if team == 1 else Ui.COL_O,
 		str(ceili(time_left)), phase == Phase.AIMING and time_left <= 5.0, notice)
-	# World +x is the RIGHT of team 1's screen but the LEFT of team 2's; a board leaning toward
-	# +z leans toward team 1 and away from team 2. Show everything from the viewer's side.
-	var vs := 1.0 if _view_team(team) == 1 else -1.0
+	# Show everything from where the viewer stands. World +x is the RIGHT of team 1's screen but
+	# the LEFT of team 2's, and a board leaning toward +z leans toward team 1 and away from
+	# team 2; a shooter circling the board sees everything in between (azimuth a, 0 = team 1).
+	var a := rig.azimuth
 	var spin: bool = env["spin"]
 	var angles: Vector2 = Rules.board_angles(env, board_time) if spin else env["tilt"]
 	ui.set_env({
-		"wind": float(env["wind"]) * vs,
+		"wind": float(env["wind"]) * cos(a),
 		"gravity": env["gravity"],
-		"lean": rad_to_deg(angles.x) * vs,
-		"twist": rad_to_deg(angles.y),
+		"lean": rad_to_deg(angles.x) * cos(a),
+		"twist": rad_to_deg(wrapf(angles.y - a, -PI * 0.5, PI * 0.5)),
 		"show_tilt": difficulty >= Rules.DIFF_VERY_HARD,
 		"spin": spin,
 		"omega": env["omega"],
+		"frozen": int(env["frozen"]),
 	})
-	# Spun round by the turntable? Say which way the board is.
+	# Carried round the board? Say which way the board is if the player has looked away.
 	var hint := ""
-	if rig.auto_yaw != 0.0:
+	if riding:
 		var local := rig.cam.global_transform.affine_inverse() * (_xf() * Vector3(0.0, Rules.BOARD_HALF, 0.0))
 		var ang := atan2(local.x, -local.z)
 		if absf(ang) > 0.5:
 			hint = Loc.t("Bàn ở bên phải  >>>") if ang > 0.0 else Loc.t("<<<  Bàn ở bên trái")
 	ui.set_compass(hint)
 	var mine := phase == Phase.AIMING and _local_controls(team)
-	ui.set_ammo(selected_ammo, [true, not _used[team][1], not _used[team][2]], mine)
+	var usable := []
+	for k in Rules.AMMO_COUNT:
+		usable.append(_ammo_ok(team, k))
+	ui.set_ammo(selected_ammo, usable, _used[team], mine, difficulty >= Rules.DIFF_INSANE)
 	var mm := ui.minimap
 	mm.board = board
 	mm.last = last_cell
 	mm.win_cells = win_cells
-	mm.flip = rig.team == 2
+	mm.flip = cos(a) < 0.0   # seen from the far side the columns run the other way
 	mm.aim = rig.aim_on_board(_xf())
 	mm.queue_redraw()

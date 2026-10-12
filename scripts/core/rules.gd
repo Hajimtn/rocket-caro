@@ -26,18 +26,21 @@ const PATH_STRIDE := 4
 const AMMO_NORMAL := 0
 const AMMO_ERASE := 1   ## wipes an opponent's mark
 const AMMO_STEER := 2   ## steered by the shooter's crosshair while it flies
+const AMMO_FREEZE := 3  ## insane only: stops the tumbling board where it is when the rocket hits it
+const AMMO_COUNT := 4
 const STEER_GAIN := 5.0       ## 1/s: how hard the rocket pulls toward the crosshair point
 const STEER_ACCEL := 45.0     ## u/s^2: maximum sideways pull (gravity is 5, wind up to 8)
+const FREEZE_TURNS := 4       ## turns a frozen board stays still (two for each player)
 const DIFF_NORMAL := 0      ## no wind, no gravity
 const DIFF_HARD := 1        ## + wind and gravity
-const DIFF_VERY_HARD := 2   ## + the board leans and twists every turn, and the player is spun round and round
-const DIFF_INSANE := 3      ## wind + gravity + a board that tumbles and spins non-stop, fast (the player does not spin)
+const DIFF_VERY_HARD := 2   ## + the board leans and twists every turn, and the shooter circles the board
+const DIFF_INSANE := 3      ## wind + gravity + a board that tumbles and spins non-stop, fast (the player stands still)
 const DIFF_NAMES := ["Bình thường", "Khó", "Rất khó", "Siêu khó"]
 const DIFF_DESC := [
 	"Không gió, không trọng lực: rocket bay thẳng.",
 	"Có gió và trọng lực làm rocket lệch.",
-	"Thêm độ dốc: bàn cờ nghiêng và xoay đổi mỗi lượt, còn bạn bị xoay vòng 360° trong lúc ngắm. Dễ gây chóng mặt.",
-	"Bàn cờ lật và quay liên tục rất nhanh: phải bắn đón đầu. Dễ gây chóng mặt.",
+	"Thêm độ dốc: bàn cờ nghiêng và xoay đổi mỗi lượt, còn bạn liên tục đi vòng quanh bàn cờ trong lúc ngắm. Dễ gây chóng mặt.",
+	"Bàn cờ lật và quay liên tục rất nhanh: phải bắn đón đầu. Có đạn băng để đóng băng bàn. Dễ gây chóng mặt.",
 ]
 const MAX_LEAN_AWAY := 0.80   ## rad (about 46 degrees): board top leaning away from the shooter
 const MAX_LEAN_TOWARD := 0.40 ## rad: leaning toward the shooter fills the screen, so keep it milder
@@ -49,8 +52,8 @@ const FLIP_MIN := 0.7         ## insane: rad/s the board somersaults about its h
 const FLIP_MAX := 1.2
 const SPIN_MIN := 1.2         ## insane: rad/s it spins about the vertical axis
 const SPIN_MAX := 2.0
-const PLAYER_SPIN_MIN := 0.7  ## very hard: rad/s the player is spun round and round (360 degrees)
-const PLAYER_SPIN_MAX := 1.1
+const ORBIT_MIN := 0.30       ## very hard: rad/s the shooter circles the board (a lap in 12-21 s)
+const ORBIT_MAX := 0.50
 const BOARD_ORIGIN := Vector3(0.0, BOARD_BOTTOM, 0.0)   ## the board hinges on its bottom edge
 const DIRS: Array[Vector2i] = [Vector2i(0, 1), Vector2i(1, 0), Vector2i(1, 1), Vector2i(1, -1)]
 
@@ -71,17 +74,20 @@ static func make_obstacles() -> Array[Dictionary]:
 ## No wind, no gravity, flat board: the baseline every difficulty builds on.
 ## spin/omega/theta0/t0 describe a tumbling board: its two angles at board-clock time tau are
 ## theta0 + omega * (tau - t0) (x = flip about the horizontal axis, y = spin about the vertical).
+## frozen > 0: a freeze rocket stopped the tumbling board (omega is zero); it counts the turns
+## left, this one included. orbit/phi0: the shooter circles the board (see shooter_azimuth).
 static func calm_env() -> Dictionary:
 	return {"wind": 0.0, "gravity": 0.0, "tilt": Vector2.ZERO, "spin": false,
 		"omega": Vector2.ZERO, "theta0": Vector2.ZERO, "t0": 0.0, "time": TURN_TIME,
-		"start_z": START_Z_FAR, "yaw_rate": 0.0}
+		"start_z": START_Z_FAR, "orbit": 0.0, "phi0": 0.0, "frozen": 0}
 
 
 ## Rolls the conditions for one turn. Everything a shot depends on lives in this dictionary, so
 ## the authority can broadcast it and every peer (and the bot) sees exactly the same physics.
 ## shooter is the team (1 or 2) whose turn it is: a static lean is chosen relative to them.
 ## prev/now keep a tumbling board continuous: the new angles start where the old ones were.
-static func roll_env(difficulty: int, rng: RandomNumberGenerator, shooter: int = 1, prev: Dictionary = {}, now: float = 0.0) -> Dictionary:
+## frozen is how many turns of a freeze are left: the board then holds still where it stopped.
+static func roll_env(difficulty: int, rng: RandomNumberGenerator, shooter: int = 1, prev: Dictionary = {}, now: float = 0.0, frozen: int = 0) -> Dictionary:
 	var env := calm_env()
 	if difficulty >= DIFF_HARD:
 		env["wind"] = rng.randf_range(-MAX_WIND, MAX_WIND)
@@ -92,17 +98,39 @@ static func roll_env(difficulty: int, rng: RandomNumberGenerator, shooter: int =
 		env["tilt"] = Vector2(
 			lean * (1.0 if shooter == 1 else -1.0),   # +x leans the top toward +z, i.e. toward team 1
 			(1.0 if rng.randf() < 0.5 else -1.0) * rng.randf_range(MIN_TWIST, MAX_TWIST))
-		# The player cannot walk, but is turned round and round on the spot.
-		env["yaw_rate"] = (1.0 if rng.randf() < 0.5 else -1.0) * rng.randf_range(PLAYER_SPIN_MIN, PLAYER_SPIN_MAX)
+		# The player cannot walk, but rides round and round the board, starting anywhere on the lap.
+		env["orbit"] = (1.0 if rng.randf() < 0.5 else -1.0) * rng.randf_range(ORBIT_MIN, ORBIT_MAX)
+		env["phi0"] = rng.randf_range(0.0, TAU)
 	if difficulty >= DIFF_INSANE:
 		env["spin"] = true
 		env["start_z"] = START_Z_NEAR
-		env["omega"] = Vector2(
-			(1.0 if rng.randf() < 0.5 else -1.0) * rng.randf_range(FLIP_MIN, FLIP_MAX),
-			(1.0 if rng.randf() < 0.5 else -1.0) * rng.randf_range(SPIN_MIN, SPIN_MAX))
 		env["t0"] = now
 		env["theta0"] = board_angles(prev, now) if prev.get("spin", false) else Vector2(rng.randf_range(0.0, TAU), rng.randf_range(0.0, TAU))
+		var rates := Vector2(
+			(1.0 if rng.randf() < 0.5 else -1.0) * rng.randf_range(FLIP_MIN, FLIP_MAX),
+			(1.0 if rng.randf() < 0.5 else -1.0) * rng.randf_range(SPIN_MIN, SPIN_MAX))
+		if frozen > 0:
+			env["frozen"] = frozen   # the rates are still rolled so the random sequence stays the same
+		else:
+			env["omega"] = rates
 	return env
+
+
+## Where the shooter stands, as an angle about the board's vertical axis: 0 is team 1's own spot
+## (+z), PI is team 2's. age is seconds since the turn started. On very hard the shooter circles.
+static func shooter_azimuth(env: Dictionary, team: int, age: float) -> float:
+	var home := 0.0 if team == 1 else PI
+	var rate := float(env.get("orbit", 0.0))
+	if rate == 0.0:
+		return home
+	return home + float(env["phi0"]) + rate * age
+
+
+## The shooter's eye, the point every one of their rockets leaves from.
+static func shooter_pos(env: Dictionary, team: int, age: float) -> Vector3:
+	var a := shooter_azimuth(env, team, age)
+	var r := float(env["start_z"])
+	return Vector3(r * sin(a), EYE_HEIGHT, r * cos(a))
 
 
 ## How far the wind alone pushes a rocket sideways after T seconds.
@@ -202,8 +230,8 @@ static func begin_flight(origin: Vector3, dir: Vector3, tau0: float = 0.0) -> Di
 
 
 ## Advances a flight by one SIM_DT step. Returns {} while still airborne, otherwise
-## {kind: placed|occupied|obstacle|miss, r, c, pos}. steer is a world point the rocket is
-## pulled toward, or null for an unguided shot.
+## {kind: placed|occupied|obstacle|miss, r, c, pos, tau} (tau = board-clock time of the end).
+## steer is a world point the rocket is pulled toward, or null for an unguided shot.
 static func step_flight(f: Dictionary, env: Dictionary, board: PackedByteArray, obstacles: Array[Dictionary], steer: Variant = null) -> Dictionary:
 	var old: Vector3 = f["pos"]
 	var vel: Vector3 = f["vel"]
@@ -218,7 +246,8 @@ static func step_flight(f: Dictionary, env: Dictionary, board: PackedByteArray, 
 	f["vel"] = vel
 	f["pos"] = pos
 	f["t"] = float(f["t"]) + SIM_DT
-	var xf := board_xform(env, float(f["tau0"]) + float(f["t"]))
+	var tau := float(f["tau0"]) + float(f["t"])
+	var xf := board_xform(env, tau)
 	var w_old := to_local(old, xf).z
 	var w_new := to_local(pos, xf).z
 	if w_old * w_new <= 0.0 and w_old != w_new:
@@ -227,12 +256,12 @@ static func step_flight(f: Dictionary, env: Dictionary, board: PackedByteArray, 
 		var cell := cell_at(l.x, l.y)
 		if cell.x >= 0:
 			f["pos"] = hit
-			return {"kind": "occupied" if board[cell.x * N + cell.y] != 0 else "placed", "r": cell.x, "c": cell.y, "pos": hit}
+			return {"kind": "occupied" if board[cell.x * N + cell.y] != 0 else "placed", "r": cell.x, "c": cell.y, "pos": hit, "tau": tau}
 	for o in obstacles:
 		if hit_obstacle(o, pos):
-			return {"kind": "obstacle", "r": -1, "c": -1, "pos": pos}
-	if pos.y < 0.0 or float(f["t"]) > FLIGHT_LIMIT or absf(pos.z) > 420.0:
-		return {"kind": "miss", "r": -1, "c": -1, "pos": pos}
+			return {"kind": "obstacle", "r": -1, "c": -1, "pos": pos, "tau": tau}
+	if pos.y < 0.0 or float(f["t"]) > FLIGHT_LIMIT or Vector2(pos.x, pos.z).length() > 420.0:
+		return {"kind": "miss", "r": -1, "c": -1, "pos": pos, "tau": tau}
 	return {}
 
 

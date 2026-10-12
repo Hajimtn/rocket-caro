@@ -53,8 +53,11 @@ func connect_to(address: String, port: int = PORT) -> Error:
 	if not "://" in address:
 		var host := address
 		if ":" not in host:
-			# On the web the game socket is tunnelled through the page's own port.
-			host += ":%s" % (_page("port") if OS.has_feature("web") and _page("port") != "" else str(port))
+			if not OS.has_feature("web"):
+				host += ":%d" % port
+			elif _page("port") != "":
+				host += ":" + _page("port")   # on the web the game socket goes through the page's own port...
+			# ...and a page on the default port (https://domain/) needs none: wss://domain
 		url = "%s://%s" % ["wss" if _page("protocol") == "https:" else "ws", host]
 	var peer := WebSocketMultiplayerPeer.new()
 	var err := peer.create_client(url)

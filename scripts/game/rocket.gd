@@ -5,6 +5,9 @@ extends Node3D
 signal landed(pos: Vector3)
 
 var ammo := Rules.AMMO_NORMAL   ## set before add_child: tints the nose cone
+var trail_id := ""              ## set before add_child: the shooter's trail skin (Skins.TRAILS)
+var _rainbow := false
+var _hue := 0.0
 var _live := false
 var _live_target := Vector3.ZERO
 var _path := PackedVector3Array()
@@ -22,7 +25,7 @@ func _ready() -> void:
 	steel.metallic = 0.4
 	steel.roughness = 0.4
 	var red := StandardMaterial3D.new()
-	red.albedo_color = [Color("c44836"), Color("a56bff"), Color("37d6ff")][ammo]
+	red.albedo_color = [Color("c44836"), Color("a56bff"), Color("37d6ff"), Color("d8f6ff")][ammo]
 	if ammo != Rules.AMMO_NORMAL:
 		red.emission_enabled = true
 		red.emission = red.albedo_color
@@ -56,30 +59,23 @@ func _ready() -> void:
 	flame.material = glow
 	_part(flame, Vector3(0, 0, 0.8), Vector3(90, 0, 0))
 
-	var smoke_mat := StandardMaterial3D.new()
-	smoke_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	smoke_mat.vertex_color_use_as_albedo = true
-	smoke_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	var puff := SphereMesh.new()
-	puff.radius = 0.22
-	puff.height = 0.44
-	puff.radial_segments = 6
-	puff.rings = 3
-	puff.material = smoke_mat
-	var ramp := Gradient.new()
-	ramp.offsets = PackedFloat32Array([0.0, 1.0])
-	ramp.colors = PackedColorArray([Color(1, 0.95, 0.75, 0.9), Color(0.8, 0.85, 0.85, 0.0)])
+	var skin := Skins.find("trail", trail_id)
+	_rainbow = skin["rainbow"]
+	var flake: bool = skin["shape"] == "flake"
 	_trail = CPUParticles3D.new()
-	_trail.mesh = puff
-	_trail.color_ramp = ramp
-	_trail.amount = 90
-	_trail.lifetime = 1.1
+	_trail.mesh = World.particle_mesh(skin["shape"], 0.63 * float(skin["size"]))
+	_trail.color_ramp = World.gradient(skin["colors"])
+	_trail.amount = skin["amount"]
+	_trail.lifetime = skin["life"]
 	_trail.local_coords = false
 	_trail.direction = Vector3.BACK
-	_trail.spread = 25.0
+	_trail.spread = 60.0 if flake else 25.0
 	_trail.initial_velocity_min = 0.3
-	_trail.initial_velocity_max = 1.2
-	_trail.gravity = Vector3.ZERO
+	_trail.initial_velocity_max = 3.0 if flake else 1.2
+	_trail.gravity = Vector3(0, -2.0, 0) if flake else Vector3.ZERO
+	_trail.particle_flag_rotate_y = flake
+	_trail.angular_velocity_min = -400.0 if flake else 0.0
+	_trail.angular_velocity_max = -_trail.angular_velocity_min
 	_trail.scale_amount_min = 0.7
 	_trail.scale_amount_max = 1.4
 	_trail.emitting = false
@@ -134,6 +130,9 @@ func is_live() -> bool:
 
 
 func _process(delta: float) -> void:
+	if _rainbow:
+		_hue = fmod(_hue + delta * 0.9, 1.0)
+		_trail.color = Color.from_hsv(_hue, 0.75, 1.0)
 	if _live:
 		var before := position
 		position = position.lerp(_live_target, 1.0 - exp(-24.0 * delta))

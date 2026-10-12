@@ -14,6 +14,9 @@ var _tilt_known := true   ## false after a tumbling spell: the next static tilt 
 var _spin_on := false
 var _tilt_tween: Tween
 var _posts: Array[MeshInstance3D] = []
+var _frame_parts: Array[MeshInstance3D] = []   ## frame bars and posts, tinted by the board skin
+var _frost := 0.0
+var _frost_tween: Tween
 
 
 func _ready() -> void:
@@ -47,47 +50,124 @@ func mark_win(cells: Array[Vector2i], team: int) -> void:
 	_tex.update(_img)
 
 
+# --- skins --------------------------------------------------------------------------------
+
+## The board's colours and pattern (Skins.BOARDS). Only this player sees it.
+func set_board_skin(id: String) -> void:
+	var s := Skins.find("board", id)
+	_mat.set_shader_parameter("paper", s["paper"])
+	_mat.set_shader_parameter("line_minor", s["minor"])
+	_mat.set_shader_parameter("line_major", s["major"])
+	_mat.set_shader_parameter("color_x", s["x"])
+	_mat.set_shader_parameter("color_o", s["o"])
+	_mat.set_shader_parameter("pattern", s["pattern"])
+	for part in _frame_parts:
+		(part.material_override as StandardMaterial3D).albedo_color = s["frame"]
+
+
+## Shapes of each team's marks (Skins.MARKS ids).
+func set_mark_styles(id_x: String, id_o: String) -> void:
+	_mat.set_shader_parameter("mark_style_x", Skins.find("mark", id_x)["style"])
+	_mat.set_shader_parameter("mark_style_o", Skins.find("mark", id_o)["style"])
+
+
+## Ices the board over (or thaws it) to show that a freeze rocket stopped it.
+func set_frozen(on: bool, animate: bool = true) -> void:
+	var target := 1.0 if on else 0.0
+	if _frost_tween != null:
+		_frost_tween.kill()
+		_frost_tween = null
+	if not animate or is_equal_approx(_frost, target):
+		_show_frost(target)
+		return
+	_frost_tween = create_tween()
+	_frost_tween.tween_method(_show_frost, _frost, target, 0.35 if on else 0.8)
+
+
+func _show_frost(v: float) -> void:
+	_frost = v
+	_mat.set_shader_parameter("frost", v)
+
+
 # --- effects ------------------------------------------------------------------------------
 
-func spawn_explosion(pos: Vector3, scale_factor: float = 1.0, ammo: int = Rules.AMMO_NORMAL) -> void:
+## Colours that tell the special rockets apart; they win over the skin's own colours.
+const AMMO_BLAST_COLORS := {
+	Rules.AMMO_ERASE: [Color(0.9, 0.8, 1, 1), Color(0.65, 0.42, 1, 0.85), Color(0.2, 0.1, 0.3, 0)],
+	Rules.AMMO_STEER: [Color(0.8, 1, 1, 1), Color(0.22, 0.84, 1, 0.85), Color(0.1, 0.2, 0.3, 0)],
+	Rules.AMMO_FREEZE: [Color(1, 1, 1, 1), Color(0.62, 0.9, 1, 0.9), Color(0.5, 0.75, 1, 0)],
+}
+
+
+## Particle mesh for skins: "ball" (a puff) or "flake" (a flat spinning chip).
+static func particle_mesh(shape: String, size: float) -> Mesh:
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.vertex_color_use_as_albedo = true
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	if shape == "flake":
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		var q := QuadMesh.new()
+		q.size = Vector2(0.5, 0.3) * size
+		q.material = mat
+		return q
 	var ball := SphereMesh.new()
-	ball.radius = 0.35
-	ball.height = 0.7
+	ball.radius = 0.35 * size
+	ball.height = 0.7 * size
 	ball.radial_segments = 8
 	ball.rings = 4
 	ball.material = mat
-	var ramp := Gradient.new()
-	ramp.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
-	match ammo:
-		Rules.AMMO_ERASE:
-			ramp.colors = PackedColorArray([Color(0.9, 0.8, 1, 1), Color(0.65, 0.42, 1, 0.85), Color(0.2, 0.1, 0.3, 0)])
-		Rules.AMMO_STEER:
-			ramp.colors = PackedColorArray([Color(0.8, 1, 1, 1), Color(0.22, 0.84, 1, 0.85), Color(0.1, 0.2, 0.3, 0)])
-		_:
-			ramp.colors = PackedColorArray([Color(1, 0.95, 0.5, 1), Color(1, 0.45, 0.12, 0.85), Color(0.25, 0.25, 0.25, 0)])
+	return ball
+
+
+static func gradient(colors: Array) -> Gradient:
+	var g := Gradient.new()
+	var offs := PackedFloat32Array()
+	for i in colors.size():
+		offs.append(float(i) / (colors.size() - 1))
+	if colors.size() == 3:
+		offs[1] = 0.35
+	g.offsets = offs
+	g.colors = PackedColorArray(colors)
+	return g
+
+
+static func rainbow() -> Gradient:
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+	g.colors = PackedColorArray([Color("ff5a5a"), Color("ffd84a"), Color("6cff6c"), Color("4ad8ff"), Color("8a6bff"), Color("ff6be0")])
+	return g
+
+
+func spawn_explosion(pos: Vector3, scale_factor: float = 1.0, ammo: int = Rules.AMMO_NORMAL, blast_id: String = "") -> void:
+	var s := Skins.find("blast", blast_id)
+	var special := AMMO_BLAST_COLORS.has(ammo)
 	var p := CPUParticles3D.new()
-	p.mesh = ball
-	p.color_ramp = ramp
+	p.mesh = particle_mesh(s["shape"], 1.0)
+	p.color_ramp = gradient(AMMO_BLAST_COLORS[ammo] if special else s["colors"])
+	if s["rainbow"] and not special:
+		p.color_initial_ramp = rainbow()
 	p.one_shot = true
 	p.explosiveness = 1.0
-	p.amount = 56
-	p.lifetime = 0.9
+	p.amount = s["amount"]
+	p.lifetime = s["life"]
 	p.direction = Vector3.UP
 	p.spread = 180.0
 	p.initial_velocity_min = 4.0 * scale_factor
-	p.initial_velocity_max = 15.0 * scale_factor
-	p.gravity = Vector3(0, -4, 0)
+	p.initial_velocity_max = float(s["speed"]) * scale_factor
+	p.gravity = Vector3(0, s["gravity"], 0)
+	p.damping_min = 2.0 if s["shape"] == "flake" else 0.0
+	p.damping_max = p.damping_min * 2.0
+	p.angular_velocity_min = -360.0 if s["shape"] == "flake" else 0.0
+	p.angular_velocity_max = -p.angular_velocity_min
+	p.particle_flag_rotate_y = s["shape"] == "flake"
 	p.scale_amount_min = 0.6
 	p.scale_amount_max = 1.8 * scale_factor
 	add_child(p)
 	p.global_position = pos
 	p.emitting = true
 	var light := OmniLight3D.new()
-	light.light_color = Color(1, 0.7, 0.3)
+	light.light_color = Color(0.6, 0.9, 1) if ammo == Rules.AMMO_FREEZE else s["light"]
 	light.omni_range = 40.0
 	light.light_energy = 6.0
 	add_child(light)
@@ -95,7 +175,7 @@ func spawn_explosion(pos: Vector3, scale_factor: float = 1.0, ammo: int = Rules.
 	var tw := create_tween()
 	tw.tween_property(light, "light_energy", 0.0, 0.5)
 	tw.tween_callback(light.queue_free)
-	get_tree().create_timer(1.6).timeout.connect(p.queue_free)
+	get_tree().create_timer(float(s["life"]) + 0.7).timeout.connect(p.queue_free)
 
 
 # --- construction ---------------------------------------------------------------------------
@@ -199,14 +279,16 @@ func _build_board() -> void:
 	bar_h.size = Vector3(Rules.BOARD_SIZE + 4.0, 1.6, 1.4)
 	var bar_v := BoxMesh.new()
 	bar_v.size = Vector3(1.6, Rules.BOARD_SIZE, 1.4)
-	_add_mesh(bar_h, frame_col, Vector3(0, Rules.BOARD_SIZE + 0.8, 0), Vector3.ZERO, _pivot)
-	_add_mesh(bar_h, frame_col, Vector3(0, -0.8, 0), Vector3.ZERO, _pivot)
-	_add_mesh(bar_v, frame_col, Vector3(-edge, Rules.BOARD_HALF, 0), Vector3.ZERO, _pivot)
-	_add_mesh(bar_v, frame_col, Vector3(edge, Rules.BOARD_HALF, 0), Vector3.ZERO, _pivot)
+	_frame_parts.append(_add_mesh(bar_h, frame_col, Vector3(0, Rules.BOARD_SIZE + 0.8, 0), Vector3.ZERO, _pivot))
+	_frame_parts.append(_add_mesh(bar_h, frame_col, Vector3(0, -0.8, 0), Vector3.ZERO, _pivot))
+	_frame_parts.append(_add_mesh(bar_v, frame_col, Vector3(-edge, Rules.BOARD_HALF, 0), Vector3.ZERO, _pivot))
+	_frame_parts.append(_add_mesh(bar_v, frame_col, Vector3(edge, Rules.BOARD_HALF, 0), Vector3.ZERO, _pivot))
 	var post := BoxMesh.new()
 	post.size = Vector3(3, Rules.BOARD_BOTTOM + 2.0, 3)
 	_posts.append(_add_mesh(post, frame_col, Vector3(-edge, -Rules.BOARD_BOTTOM * 0.5 - 0.4, 0), Vector3.ZERO, _pivot))
 	_posts.append(_add_mesh(post, frame_col, Vector3(edge, -Rules.BOARD_BOTTOM * 0.5 - 0.4, 0), Vector3.ZERO, _pivot))
+	_frame_parts.append_array(_posts)
+	set_board_skin(Prefs.skins["board"])
 
 
 ## Swings the board to a new lean/twist (see Rules.board_basis).

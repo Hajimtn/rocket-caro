@@ -19,7 +19,12 @@ func _init() -> void:
 			var env := Rules.roll_env(diff, rng, shooter, {}, 0.0)
 			var tau0 := rng.randf_range(0.0, 60.0)
 			var cell := Vector2i(rng.randi_range(0, Rules.N - 1), rng.randi_range(0, Rules.N - 1))
-			var origin := Vector3(rng.randf_range(-30, 30), 5, float(env["start_z"]) * (1.0 if shooter == 1 else -1.0))
+			var age := rng.randf_range(0.0, Rules.TURN_TIME)
+			var origin := Rules.shooter_pos(env, shooter, age)
+			# circling the board: skip the moments it is seen (nearly) edge-on, nobody can hit it then
+			while float(env["orbit"]) != 0.0 and absf(Rules.board_xform(env, tau0).basis.z.dot(Vector3(origin.x, 0, origin.z).normalized())) < 0.35:
+				age += 0.5
+				origin = Rules.shooter_pos(env, shooter, age)
 			# unguided, aimed at where the cell will be; like the bot, try every solution and, if
 			# the board is in the way, wait up to 3 s for a better moment
 			var aim := Rules.solve_aim_cell(origin, cell, env, tau0)
@@ -96,10 +101,55 @@ func _init() -> void:
 	if not (b["theta0"] as Vector2).is_equal_approx(Rules.board_angles(a, 7.0)):
 		fails += 1
 		print("FAIL: tumbling board is discontinuous between turns")
-	# Insane tumbles the board; only very hard spins the player.
-	if a["yaw_rate"] != 0.0 or very["yaw_rate"] == 0.0 or absf(float(very["yaw_rate"])) < Rules.PLAYER_SPIN_MIN:
+	# Insane tumbles the board; only very hard carries the player round it.
+	if a["orbit"] != 0.0 or very["orbit"] == 0.0 or absf(float(very["orbit"])) < Rules.ORBIT_MIN:
 		fails += 1
-		print("FAIL: only very hard spins the player")
+		print("FAIL: only very hard circles the player")
+	# Circling: always at the same distance, a full lap in under two turns, back where it began.
+	var lap := TAU / absf(float(very["orbit"]))
+	for team in [1, 2]:
+		var p0 := Rules.shooter_pos(very, team, 0.0)
+		var p1 := Rules.shooter_pos(very, team, lap)
+		var ph := Rules.shooter_pos(very, team, lap * 0.5)
+		if absf(Vector2(p0.x, p0.z).length() - Rules.START_Z_FAR) > 0.01 or p0.distance_to(p1) > 0.01 \
+				or p0.distance_to(ph) < Rules.START_Z_FAR * 1.9 or lap > 2.0 * Rules.TURN_TIME:
+			fails += 1
+			print("FAIL: orbit geometry")
+	# Standing still: each team on its own spot.
+	var still := Rules.roll_env(Rules.DIFF_HARD, rng)
+	if not Rules.shooter_pos(still, 1, 7.0).is_equal_approx(Vector3(0, Rules.EYE_HEIGHT, Rules.START_Z_FAR)) \
+			or not Rules.shooter_pos(still, 2, 7.0).is_equal_approx(Vector3(0, Rules.EYE_HEIGHT, -Rules.START_Z_FAR)):
+		fails += 1
+		print("FAIL: fixed shooter spots")
+
+	# Freeze: a frozen turn keeps the board exactly where it stopped, and it starts tumbling again
+	# from there once the freeze is over.
+	var stopped := a.duplicate()
+	var hit_angles := Rules.board_angles(a, 3.3)
+	stopped["omega"] = Vector2.ZERO
+	stopped["theta0"] = hit_angles
+	var f1 := Rules.roll_env(Rules.DIFF_INSANE, rng, 2, stopped, 5.0, Rules.FREEZE_TURNS)
+	var f1_pose := Rules.board_xform(f1, 5.0)
+	if int(f1["frozen"]) != Rules.FREEZE_TURNS or f1["omega"] != Vector2.ZERO or not f1_pose.is_equal_approx(Rules.board_xform(f1, 14.0)) \
+			or not (f1["theta0"] as Vector2).is_equal_approx(hit_angles):
+		fails += 1
+		print("FAIL: a frozen board must hold its pose")
+	var thaw := Rules.roll_env(Rules.DIFF_INSANE, rng, 1, f1, 30.0, 0)
+	if int(thaw["frozen"]) != 0 or (thaw["omega"] as Vector2).length() < Rules.FLIP_MIN or not (thaw["theta0"] as Vector2).is_equal_approx(hit_angles):
+		fails += 1
+		print("FAIL: a thawed board must start tumbling from where it froze")
+	# The impact time comes back with the result, so the freeze pose is the pose at impact.
+	var probe := Rules.simulate_shot(Vector3(0, 5, 100), Vector3(0, 0.25, -1).normalized(), a, empty, obstacles, 2.0)
+	if not probe.has("tau") or float(probe["tau"]) < 2.5:
+		fails += 1
+		print("FAIL: a result must carry the board-clock time it ended at")
+
+	# Skins: unknown or missing ids fall back to the defaults, known ones survive.
+	var dressed := Skins.sanitize({"board": "neon", "mark": "nope", "trail": 7})
+	if dressed["board"] != "neon" or dressed["mark"] != Skins.MARKS[0]["id"] or dressed["trail"] != Skins.TRAILS[0]["id"] \
+			or dressed["blast"] != Skins.BLASTS[0]["id"] or Skins.sanitize(null) != Skins.defaults():
+		fails += 1
+		print("FAIL: skin loadout sanitising")
 	if Rules.START_Z_NEAR - 69.0 < 20.0:
 		fails += 1
 		print("FAIL: a fixed player must stand clear of the tumbling board (radius ~69)")
@@ -113,9 +163,9 @@ func _init() -> void:
 		fails += 1
 		print("FAIL: insane stands near, the rest far")
 	for d in [Rules.DIFF_NORMAL, Rules.DIFF_HARD]:
-		if Rules.roll_env(d, rng)["yaw_rate"] != 0.0:
+		if Rules.roll_env(d, rng)["orbit"] != 0.0:
 			fails += 1
-			print("FAIL: no player spin below very hard")
+			print("FAIL: nobody circles the board below very hard")
 
 	# Threat detection.
 	var t := empty.duplicate()

@@ -1,0 +1,29 @@
+name: super-caro
+
+# web:  nginx phục vụ bản web export, và chuyển mọi kết nối WebSocket sang `game`.
+# game: Godot headless chạy trọng tài (--server) từ CHÍNH file .pck của bản web
+#       vừa export, nên client và server luôn cùng phiên bản.
+services:
+  web:
+    build:
+      context: .
+      dockerfile: web.Dockerfile
+    container_name: super-caro-web
+    restart: unless-stopped
+    depends_on: [game]
+    ports:
+      - "127.0.0.1:8792:80"     # chỉ nginx của host vào được
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  game:
+    build:
+      context: .
+      dockerfile: game.Dockerfile
+    container_name: super-caro-game
+    restart: unless-stopped
+    expose: ["24571"]           # chỉ trong mạng compose, không mở ra host
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

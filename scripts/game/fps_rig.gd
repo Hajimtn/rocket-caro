@@ -19,7 +19,7 @@ var yaw := 0.0
 var start_pitch := 0.4   ## set per turn by reset_for_turn so the whole board is in view
 var pitch := start_pitch
 var menu_mode := false   ## idle sway behind the menus
-var auto_yaw := 0.0         ## rad/s the player is spun round and round on the spot (very hard)
+var azimuth := 0.0       ## where the body stands round the board (Rules.shooter_azimuth); it faces the middle
 var _was_captured := false
 var _look_ok_at := 0   ## ticks (ms) before which mouse look is ignored
 var _menu_t := 0.0
@@ -44,18 +44,26 @@ func _ready() -> void:
 ## Puts the player back on their start spot, facing the middle of the board. The pitch is the
 ## average of the angles to the board's bottom and top edge, which keeps all of it on screen
 ## even when it leans.
-func reset_for_turn(for_team: int, xf: Transform3D = Transform3D(Basis.IDENTITY, Rules.BOARD_ORIGIN), start_z: float = Rules.START_Z_FAR) -> void:
+func reset_for_turn(for_team: int, xf: Transform3D = Transform3D(Basis.IDENTITY, Rules.BOARD_ORIGIN), start_z: float = Rules.START_Z_FAR, at_azimuth: float = NAN) -> void:
 	team = for_team
 	yaw = 0.0
-	position = Vector3(0.0, Rules.EYE_HEIGHT, start_z if team == 1 else -start_z)
+	azimuth = at_azimuth if not is_nan(at_azimuth) else (0.0 if team == 1 else PI)
+	position = Vector3(start_z * sin(azimuth), Rules.EYE_HEIGHT, start_z * cos(azimuth))
 	var bottom := xf.origin
 	var top := xf * Vector3(0.0, Rules.BOARD_SIZE, 0.0)
-	var a_bottom := atan2(bottom.y - position.y, absf(bottom.z - position.z))
-	var a_top := atan2(top.y - position.y, absf(top.z - position.z))
+	var a_bottom := atan2(bottom.y - position.y, Vector2(bottom.x - position.x, bottom.z - position.z).length())
+	var a_top := atan2(top.y - position.y, Vector2(top.x - position.x, top.z - position.z).length())
 	start_pitch = clampf(0.5 * (a_bottom + a_top), PITCH_MIN, PITCH_MAX)
 	pitch = start_pitch
 	set_zoom(false)
 	_apply()
+
+
+## Carries the player round the board (very hard): the body keeps facing the middle, and the
+## player's own mouse look stays on top of that.
+func ride(at_azimuth: float, radius: float) -> void:
+	azimuth = at_azimuth
+	position = Vector3(radius * sin(azimuth), Rules.EYE_HEIGHT, radius * cos(azimuth))
 
 
 func set_zoom(on: bool) -> void:
@@ -87,7 +95,7 @@ func kick() -> void:
 
 
 func _apply() -> void:
-	rotation = Vector3(0.0, (0.0 if team == 1 else PI) - yaw, 0.0)
+	rotation = Vector3(0.0, azimuth - yaw, 0.0)
 	cam.rotation.x = pitch
 
 
@@ -104,8 +112,6 @@ func set_menu_mode(on: bool) -> void:
 
 
 func _process(delta: float) -> void:
-	if auto_yaw != 0.0 and not menu_mode:
-		yaw += auto_yaw * delta   # the turntable under the player's feet
 	# Grabbing the mouse can deliver one huge bogus motion event; skip the first instant.
 	var captured := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 	if captured and not _was_captured:
@@ -158,7 +164,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				set_zoom(not zoom)
 			elif k.physical_keycode == KEY_SPACE:
 				_request_fire()
-			elif k.physical_keycode >= KEY_1 and k.physical_keycode <= KEY_3:
+			elif k.physical_keycode >= KEY_1 and k.physical_keycode < KEY_1 + Rules.AMMO_COUNT:
 				ammo_selected.emit(k.physical_keycode - KEY_1)
 
 

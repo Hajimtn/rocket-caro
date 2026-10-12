@@ -15,6 +15,7 @@ signal create_room_requested(room_name: String)
 signal join_room_requested(room_id: int)
 signal quick_join_requested
 signal refresh_rooms_requested
+signal skins_changed           ## Prefs.skins changed (the board behind the menus shows the new look)
 
 const COL_ACCENT := Color("e9f48b")
 const COL_TEXT := Color("f5f2df")
@@ -60,6 +61,9 @@ var _over_sub: Label
 var _rematch_btn: Button
 var _warning_back := "menu"
 var _hide_check: CheckBox
+var _loadout_next := "bot"   ## what the skin screen's start button leads to: bot | local | lan
+var _loadout_go: Button
+var _skin_buttons := {}      ## kind -> Array of {id, button, label}
 
 
 func _ready() -> void:
@@ -76,10 +80,12 @@ func _build_all() -> void:
 	_pickers.clear()
 	_ammo_panels.clear()
 	_ammo_labels.clear()
+	_skin_buttons.clear()
 	_build_hud()
 	set_difficulty(Prefs.difficulty)
 	_build_overlay()
 	_build_menu_card()
+	_build_loadout_card()
 	_build_join_card()
 	_build_howto_card()
 	_build_settings_card()
@@ -102,6 +108,8 @@ func rebuild(card: String) -> void:
 	match card:
 		"settings":
 			show_settings(_settings_back)
+		"loadout":
+			show_loadout(_loadout_next)
 		"warning":
 			show_warning(warn_back)
 		"":
@@ -129,6 +137,14 @@ func show_menu(message: String = "") -> void:
 	_menu_msg.text = message
 	_menu_msg.visible = message != ""
 	_show_card("menu")
+
+
+## The skin screen shown before a match; next is where its start button leads (bot | local | lan).
+func show_loadout(next: String) -> void:
+	_loadout_next = next
+	_loadout_go.text = Loc.t("Tiếp tục") if next == "lan" else Loc.t("Bắt đầu trận")
+	_refresh_skin_buttons()
+	_show_card("loadout")
 
 
 func show_join() -> void:
@@ -214,6 +230,8 @@ func debug_card(card_name: String) -> void:
 		show_warning("menu")
 	elif card_name == "settings":
 		show_settings("menu")
+	elif card_name == "loadout":
+		show_loadout("bot")
 	elif card_name == "rooms":
 		set_room_list([
 			{"id": 1, "name": "Phòng của Minh", "count": 1, "names": ["Minh"], "playing": false},
@@ -564,7 +582,7 @@ func _build_hud() -> void:
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	minimap = Minimap.new()
 	left.add_child(minimap)
-	left.add_child(_label(Loc.t("Chuột ngắm · Click/Space bắn\n1/2/3 chọn đạn · Chuột phải/Z zoom\nEsc tạm dừng"), 12, COL_DIM))
+	left.add_child(_label(Loc.t("Chuột ngắm · Click/Space bắn\n1-4 chọn đạn · Chuột phải/Z zoom\nEsc tạm dừng"), 12, COL_DIM))
 	bottom.add_child(left)
 	var center := VBoxContainer.new()
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -615,7 +633,7 @@ func _build_hud() -> void:
 	set_hud_visible(false)
 
 
-const AMMO_NAMES := ["1 · Đạn thường", "2 · Đạn tẩy", "3 · Đạn đuổi"]
+const AMMO_NAMES := ["1 · Đạn thường", "2 · Đạn tẩy", "3 · Đạn đuổi", "4 · Đạn băng"]
 
 
 func _build_ammo_bar() -> HBoxContainer:
@@ -632,14 +650,16 @@ func _build_ammo_bar() -> HBoxContainer:
 		row.add_child(panel)
 		_ammo_panels.append(panel)
 		_ammo_labels.append(label)
-	set_ammo(0, [true, true, true], false)
+	set_ammo(0, [true, true, true, true], [false, false, false, false], false, false)
 	return row
 
 
-## selected: 0 normal, 1 erase, 2 steer. available[i] is false once a special has been used.
-func set_ammo(selected: int, available: Array, shown: bool) -> void:
+## selected: Rules.AMMO_*. available[i]: can be fired right now; used[i]: spent this match.
+## with_freeze: the freeze rocket only exists on insane, so its slot is hidden otherwise.
+func set_ammo(selected: int, available: Array, used: Array, shown: bool, with_freeze: bool) -> void:
 	_ammo_panels[0].get_parent().visible = shown
-	for i in 3:
+	_ammo_panels[Rules.AMMO_FREEZE].visible = with_freeze
+	for i in _ammo_panels.size():
 		var sb := _panel_style(0.9)
 		sb.content_margin_top = 7
 		sb.content_margin_bottom = 7
@@ -649,7 +669,8 @@ func set_ammo(selected: int, available: Array, shown: bool) -> void:
 			sb.set_border_width_all(2)
 			sb.border_color = COL_ACCENT
 		_ammo_panels[i].add_theme_stylebox_override("panel", sb)
-		_ammo_labels[i].text = Loc.t(AMMO_NAMES[i]) + ("" if usable else Loc.t(" (đã dùng)"))
+		var why := "" if usable else (Loc.t(" (đã dùng)") if used[i] else Loc.t(" (chưa dùng được)"))
+		_ammo_labels[i].text = Loc.t(AMMO_NAMES[i]) + why
 		_ammo_labels[i].add_theme_color_override("font_color", COL_TEXT if usable else Color(1, 1, 1, 0.35))
 
 
@@ -710,21 +731,88 @@ func _build_menu_card() -> void:
 	right.add_child(_label(Loc.t("CHỌN CHẾ ĐỘ CHƠI"), 11, COL_DIM))
 	_menu_msg = _para("", Color("ffb199"), 14, 460)
 	right.add_child(_menu_msg)
+	# Every mode goes through the skin screen first.
 	var lan := _mode_button(Loc.t("Chơi mạng LAN"), Loc.t("Vào sảnh phòng, đấu với bạn bè cùng Wi-Fi."), true)
 	lan.pressed.connect(func() -> void:
 		_commit_name()
-		show_join())
+		show_loadout("lan"))
 	right.add_child(lan)
-	var bot := _mode_button(Loc.t("Chơi với Bot"), Loc.t("Luyện tập một mình. Bot biết dùng cả đạn tẩy."), false)
+	var bot := _mode_button(Loc.t("Chơi với Bot"), Loc.t("Luyện tập một mình. Bot biết dùng cả đạn đặc biệt."), false)
 	bot.pressed.connect(func() -> void:
 		_commit_name()
-		bot_requested.emit())
+		show_loadout("bot"))
 	right.add_child(bot)
 	var local := _mode_button(Loc.t("2 người · cùng máy"), Loc.t("Hai người thay phiên nhau trên một màn hình."), false)
 	local.pressed.connect(func() -> void:
 		_commit_name()
-		local_requested.emit())
+		show_loadout("local"))
 	right.add_child(local)
+
+
+## Skins chosen before a match. Everything is saved at once (Prefs.skins) and the board behind
+## the menu changes as you pick.
+func _build_loadout_card() -> void:
+	var box := _make_card("loadout", 760)
+	box.add_theme_constant_override("separation", 8)
+	(_cards["loadout"] as PanelContainer).get_theme_stylebox("panel").content_margin_top = 24
+	(_cards["loadout"] as PanelContainer).get_theme_stylebox("panel").content_margin_bottom = 24
+	_header(box, Loc.t("Chọn skin"), Loc.t("Quay lại"), func() -> void: show_menu())
+	box.add_child(_para(Loc.t("Bàn cờ chỉ mình bạn nhìn thấy. Dấu trên bàn, hiệu ứng nổ và vệt đường bay thì đối thủ cũng thấy (dấu của hai đội cùng kiểu nhưng khác màu)."), COL_MUTED, 13, 688))
+	for kind in Skins.KINDS:
+		box.add_child(_label(Loc.t(Skins.KIND_NAMES[kind]).to_upper(), 11, COL_DIM))
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var entries: Array = []
+		for s: Dictionary in Skins.list(kind):
+			var b := _button("", false)
+			b.custom_minimum_size = Vector2(0, 80)
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			var inner := VBoxContainer.new()
+			inner.set_anchors_preset(Control.PRESET_FULL_RECT)
+			inner.offset_left = 8
+			inner.offset_right = -8
+			inner.offset_top = 8
+			inner.offset_bottom = -6
+			inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			inner.add_theme_constant_override("separation", 4)
+			var sw := SkinSwatch.new(kind, s["id"])
+			sw.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			inner.add_child(sw)
+			var l := _label(Loc.t(s["name"]), 13)
+			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			l.add_theme_constant_override("outline_size", 0)
+			inner.add_child(l)
+			b.add_child(inner)
+			var id: String = s["id"]
+			b.pressed.connect(func() -> void:
+				Prefs.skins[kind] = id
+				Prefs.save()
+				_refresh_skin_buttons()
+				skins_changed.emit())
+			row.add_child(b)
+			entries.append({"id": id, "button": b, "label": l})
+		_skin_buttons[kind] = entries
+		box.add_child(row)
+	_loadout_go = _button(Loc.t("Bắt đầu trận"))
+	_loadout_go.custom_minimum_size = Vector2(0, 54)
+	_loadout_go.add_theme_font_size_override("font_size", 18)
+	_loadout_go.pressed.connect(func() -> void:
+		if _loadout_next == "lan":
+			show_join()
+		elif _loadout_next == "local":
+			local_requested.emit()
+		else:
+			bot_requested.emit())
+	box.add_child(_loadout_go)
+	_refresh_skin_buttons()
+
+
+func _refresh_skin_buttons() -> void:
+	for kind: String in _skin_buttons:
+		for e: Dictionary in _skin_buttons[kind]:
+			var on: bool = Prefs.skins[kind] == e["id"]
+			_style_button(e["button"], on)
+			(e["label"] as Label).add_theme_color_override("font_color", Color("20382c") if on else COL_TEXT)
 
 
 func _commit_name() -> void:
@@ -817,9 +905,9 @@ func _build_howto_card() -> void:
 		[Loc.t("MỤC TIÊU"), Loc.t("Bắn rocket vào ô trống để đặt dấu của bạn. Ai xếp được %d dấu liên tiếp (ngang, dọc hoặc chéo) trước thì thắng.") % Rules.WIN_LEN],
 		[Loc.t("MỖI LƯỢT"), Loc.t("Có %d giây và một phát bắn. Bắn hụt, trúng cây/đá, trúng ô đã có dấu hoặc hết giờ đều mất lượt.") % int(Rules.TURN_TIME)],
 		[Loc.t("GIÓ, TRỌNG LỰC, ĐỘ DỐC"), Loc.t("Bảng ở giữa trên cho biết điều kiện lượt này theo màn hình của bạn: mũi tên vàng là gió, mũi tên đỏ là trọng lực, hình bàn nghiêng là độ dốc. Hãy ngắm bù ngược lại: gió đẩy sang phải thì ngắm lệch sang trái, và ngắm cao hơn một chút.")],
-		[Loc.t("ĐỘ KHÓ"), Loc.t("Bình thường: không gió, không trọng lực.\nKhó: có gió và trọng lực.\nRất khó: bàn cờ nghiêng (dốc) và xoay, đổi mỗi lượt, còn bạn đứng yên một chỗ nhưng bị xoay vòng liên tục: kéo chuột ngược lại để giữ tâm ngắm, và chờ bàn dừng rồi mới bắn được.\nSiêu khó: gió, trọng lực, và bàn cờ lật, quay liên tục rất nhanh. Rocket bay mất khoảng 1 giây nên phải bắn đón đầu: hãy nhìn hình bàn quay trên bảng điều kiện và chọn lúc ô muốn bắn sắp tới đúng chỗ.")],
-		[Loc.t("ĐẠN ĐẶC BIỆT (mỗi loại 1 lần mỗi ván)"), Loc.t("Phím 2, đạn tẩy: bắn trúng dấu của đối thủ để xóa nó.\nPhím 3, đạn đuổi: sau khi bắn, di chuột để lái rocket về ô muốn trúng. Phím 1 quay về đạn thường.")],
-		[Loc.t("ĐIỀU KHIỂN"), Loc.t("Chuột ngắm · click hoặc Space bắn · chuột phải hoặc Z zoom · 1/2/3 chọn đạn · Esc tạm dừng. Bạn đứng yên một chỗ, không di chuyển được.")],
+		[Loc.t("ĐỘ KHÓ"), Loc.t("Bình thường: không gió, không trọng lực.\nKhó: có gió và trọng lực.\nRất khó: bàn cờ nghiêng (dốc) và xoay, đổi mỗi lượt, còn bạn bị đưa đi vòng quanh bàn cờ liên tục trong lúc ngắm: có lúc thấy bàn chính diện, có lúc chỉ thấy cạnh bàn hoặc mặt sau. Chờ bàn dừng rồi mới bắn được.\nSiêu khó: gió, trọng lực, và bàn cờ lật, quay liên tục rất nhanh. Rocket bay mất khoảng 1 giây nên phải bắn đón đầu: hãy nhìn hình bàn quay trên bảng điều kiện và chọn lúc ô muốn bắn sắp tới đúng chỗ.")],
+		[Loc.t("ĐẠN ĐẶC BIỆT (mỗi loại 1 lần mỗi ván)"), Loc.t("Phím 2, đạn tẩy: bắn trúng dấu của đối thủ để xóa nó.\nPhím 3, đạn đuổi: sau khi bắn, di chuột để lái rocket về ô muốn trúng.\nPhím 4, đạn băng (chỉ ở Siêu khó): trúng bàn cờ là bàn đứng yên ngay tại tư thế lúc trúng trong %d lượt, không đặt dấu. Chọn đúng lúc bắn: bàn có thể đông cứng ở góc rất khó bắn.\nPhím 1 quay về đạn thường.") % Rules.FREEZE_TURNS],
+		[Loc.t("ĐIỀU KHIỂN"), Loc.t("Chuột ngắm · click hoặc Space bắn · chuột phải hoặc Z zoom · 1-4 chọn đạn · Esc tạm dừng. Bạn không tự di chuyển được.")],
 	]
 	for sec in sections:
 		box.add_child(_label(sec[0], 11, COL_ACCENT))
@@ -890,7 +978,7 @@ func _build_warning_card() -> void:
 	var box := _make_card("warning", 720)
 	_language_row(box)
 	box.add_child(_label(Loc.t("Cảnh báo sức khỏe"), 34, Color("ffd9a0")))
-	box.add_child(_para(Loc.t("Rocket Caro là game góc nhìn thứ nhất với nhiều chuyển động mạnh: ở độ khó Rất khó chính bạn bị xoay vòng 360° liên tục, và ở độ khó Siêu khó bàn cờ lật, quay liên tục rất nhanh. Những hiệu ứng này có thể gây chóng mặt, buồn nôn, mỏi mắt hoặc đau đầu, đặc biệt với người dễ say tàu xe, người có vấn đề về tiền đình hoặc rối loạn thăng bằng."), COL_TEXT, 15, 648))
+	box.add_child(_para(Loc.t("Rocket Caro là game góc nhìn thứ nhất với nhiều chuyển động mạnh: ở độ khó Rất khó chính bạn bị đưa đi vòng quanh bàn cờ liên tục, và ở độ khó Siêu khó bàn cờ lật, quay liên tục rất nhanh. Những hiệu ứng này có thể gây chóng mặt, buồn nôn, mỏi mắt hoặc đau đầu, đặc biệt với người dễ say tàu xe, người có vấn đề về tiền đình hoặc rối loạn thăng bằng."), COL_TEXT, 15, 648))
 	box.add_child(_label(Loc.t("ĐỂ CHƠI AN TOÀN HƠN"), 11, COL_ACCENT))
 	for tip in [
 		Loc.t("Bắt đầu với độ khó Bình thường hoặc Khó. Rất khó và Siêu khó gây chóng mặt nhiều nhất."),

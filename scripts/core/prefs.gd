@@ -12,11 +12,16 @@ var test_mode := false      ## set by the --diff/--lang/--nowarn test flags: nev
 var language := "vi"       ## "vi" or "en"
 var hide_warning := false   ## skip the health-warning screen at start-up
 var difficulty := Rules.DIFF_HARD   ## last chosen difficulty (offline games and rooms you create)
+var skins := Skins.defaults()       ## chosen cosmetics, see Skins
 
 
 func _ready() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(PATH) == OK:
+		var saved := {}
+		for kind in Skins.KINDS:
+			saved[kind] = cfg.get_value("skins", kind, "")
+		skins = Skins.sanitize(saved)
 		player_name = str(cfg.get_value("player", "name", ""))
 		address = str(cfg.get_value("net", "address", ""))
 		sensitivity = clampf(float(cfg.get_value("input", "sensitivity", 1.0)), 0.3, 2.5)
@@ -44,4 +49,6 @@ func save() -> void:
 	cfg.set_value("game", "difficulty", difficulty)
 	cfg.set_value("ui", "language", language)
 	cfg.set_value("ui", "hide_warning", hide_warning)
+	for kind in Skins.KINDS:
+		cfg.set_value("skins", kind, skins[kind])
 	cfg.save(PATH)

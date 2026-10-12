@@ -19,7 +19,7 @@ Caro khổng lồ 15×15, đặt dấu bằng rocket. Gió, trọng lực và c�
 - Mỗi lượt chỉ có 15 giây và một phát bắn.
 - Gió và trọng lực làm rocket lệch khỏi tâm ngắm.
 - Rocket trúng cây, đá, hoặc ô đã có dấu thì mất lượt.
-- 4 độ khó: *Bình thường* (không gió, không trọng lực), *Khó* (có gió và trọng lực), *Rất khó* (bàn cờ nghiêng và xoay đổi mỗi lượt, còn bạn bị xoay vòng 360° tại chỗ), *Siêu khó* (bàn cờ lật và quay liên tục rất nhanh).
+- 4 độ khó: *Bình thường* (không gió, không trọng lực), *Khó* (có gió và trọng lực), *Rất khó* (bàn cờ nghiêng và xoay đổi mỗi lượt, còn bạn bị đưa đi vòng quanh bàn cờ), *Siêu khó* (bàn cờ lật và quay liên tục rất nhanh, có đạn băng để đóng băng bàn).
 - Hai đạn đặc biệt, mỗi loại dùng 1 lần mỗi ván: **đạn tẩy** xóa một dấu của đối thủ, **đạn đuổi** cho bạn lái rocket bằng chuột sau khi bắn.
 
 **Chế độ chơi (bản trên trang này):** chơi với Bot, hoặc 2 người thay phiên trên cùng một máy.

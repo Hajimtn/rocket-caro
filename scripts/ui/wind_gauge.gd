@@ -11,6 +11,7 @@ const GRAV_COL := Color("ffad92")
 const TILT_COL := Color("9ed5ff")
 const TEXT_COL := Color("f5f2df")
 const DIM_COL := Color(1, 1, 1, 0.18)
+const FROST_COL := Color("bdeeff")
 const WIND_W := 170.0
 const GRAV_W := 96.0
 const TILT_W := 160.0
@@ -23,6 +24,7 @@ var twist := 0.0       ## degrees, positive = the board's right end swings towar
 var show_tilt := false
 var spin := false
 var omega := Vector2.ZERO   ## rad/s: flip, spin
+var frozen := 0             ## turns a freeze rocket still holds the tumbling board still
 
 
 func _init() -> void:
@@ -39,8 +41,11 @@ func set_env(v: Dictionary) -> void:
 	if show_tilt != v["show_tilt"] or spin != v["spin"]:
 		show_tilt = v["show_tilt"]
 		spin = v["spin"]
-		omega = v["omega"]
 		custom_minimum_size.x = WIND_W + GRAV_W + (TILT_W if show_tilt else 0.0)
+		changed = true
+	if omega != v["omega"] or frozen != v["frozen"]:
+		omega = v["omega"]
+		frozen = v["frozen"]
 		changed = true
 	if changed:
 		queue_redraw()
@@ -82,7 +87,9 @@ func _draw() -> void:
 		draw_line(Vector2(x0, 6), Vector2(x0, 58), Color(1, 1, 1, 0.15), 1.0)
 		var head := Loc.t("Lật %.1f · Quay %.1f rad/s") % [absf(omega.x), absf(omega.y)] if spin \
 			else Loc.t("Dốc %d° · Xoay %d°") % [roundi(lean), roundi(twist)]
-		draw_string(font, Vector2(x0, 14), head, HORIZONTAL_ALIGNMENT_CENTER, TILT_W, 12, TEXT_COL)
+		if spin and frozen > 0:
+			head = Loc.t("ĐÓNG BĂNG · còn %d lượt") % frozen
+		draw_string(font, Vector2(x0, 14), head, HORIZONTAL_ALIGNMENT_CENTER, TILT_W, 12, FROST_COL if (spin and frozen > 0) else TEXT_COL)
 		var sx := x0 + 48.0
 		var pivot := Vector2(sx, 36.0) if spin else Vector2(sx, 56.0)   # a tumbling board turns about its middle
 		draw_circle(Vector2(sx - 34.0, 56.0), 3.0, TEXT_COL)                         # you

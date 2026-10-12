@@ -45,17 +45,18 @@ Cài đặt lưu ở `user://settings.cfg` (script `scripts/core/prefs.gd`).
 Chọn ở menu chính (chơi bot / 2 người) hoặc khi tạo phòng LAN; lựa chọn được nhớ. Mỗi mức gồm mức trước cộng thêm:
 - **Bình thường**: không gió, không trọng lực (rocket bay thẳng).
 - **Khó**: gió + trọng lực, đổi gió mỗi lượt.
-- **Rất khó**: bàn cờ nghiêng mạnh và xoay quanh trục đứng (9°–34°), đổi mỗi lượt. Độ dốc tính theo người bắn: ngả ra xa 17°–46°, hoặc ngả vào gần nhẹ hơn (17°–23°, vì ngả vào gần mạnh sẽ che kín màn hình); bàn mất 0.8 giây để chuyển góc và trong lúc đó chưa bắn được. **Đồng thời chính người chơi bị xoay vòng 360° liên tục tại chỗ** trong suốt lượt của mình (0.7–1.1 rad/s, một vòng khoảng 6–9 giây, chiều đổi mỗi lượt): phải kéo chuột ngược lại để giữ tâm ngắm vào bàn; có dòng gợi ý "Bàn ở bên trái/phải" khi bạn quay lạc hướng.
-- **Siêu khó**: gió + trọng lực, và bàn cờ **lật, quay liên tục rất nhanh** (lật 0.7–1.2 rad/s quanh trục ngang, quay 1.2–2.0 rad/s quanh trục đứng; tốc độ và chiều đổi mỗi lượt, bàn không bị giật mà quay tiếp từ góc cũ). Người chơi **không** bị xoay ở mức này. Rocket bay mất khoảng 1 giây nên phải bắn *đón đầu*: hình bàn quay trên bảng điều kiện cho biết bàn đang ở đâu.
+- **Rất khó**: bàn cờ nghiêng mạnh và xoay quanh trục đứng (9°–34°), đổi mỗi lượt. Độ dốc tính theo người bắn: ngả ra xa 17°–46°, hoặc ngả vào gần nhẹ hơn (17°–23°, vì ngả vào gần mạnh sẽ che kín màn hình); bàn mất 0.8 giây để chuyển góc và trong lúc đó chưa bắn được. **Đồng thời người bắn bị đưa đi vòng quanh bàn cờ liên tục** (bán kính 160, 0.30–0.50 rad/s, một vòng khoảng 12–21 giây, chiều và điểm xuất phát ngẫu nhiên mỗi lượt). Thân người luôn quay mặt về tâm bàn, chuột vẫn ngắm như thường; có lúc thấy bàn chính diện, có lúc chỉ thấy cạnh bàn hoặc mặt sau (bị lật gương). Vòng quay dừng khi rocket rời nòng. Gió, độ dốc và minimap hiển thị theo chỗ đang đứng; có dòng gợi ý "Bàn ở bên trái/phải" khi bạn nhìn lạc hướng. Vị trí là hàm của thời gian trong lượt (`Rules.shooter_pos`): máy khách gửi kèm thời điểm bắn, trọng tài chấp nhận nếu trễ không quá 0.5 giây rồi tự tính chỗ đứng.
+- **Siêu khó**: gió + trọng lực, và bàn cờ **lật, quay liên tục rất nhanh** (lật 0.7–1.2 rad/s quanh trục ngang, quay 1.2–2.0 rad/s quanh trục đứng; tốc độ và chiều đổi mỗi lượt, bàn không bị giật mà quay tiếp từ góc cũ). Người chơi đứng yên ở mức này. Có thêm **đạn băng** (xem phần Đạn). Rocket bay mất khoảng 1 giây nên phải bắn *đón đầu*: hình bàn quay trên bảng điều kiện cho biết bàn đang ở đâu.
 Cách làm bàn quay khớp giữa các máy: tư thế của bàn là một hàm của **đồng hồ bàn** (`board_time`) do trọng tài giữ. Khi bắn, trọng tài tính cả đường bay theo đồng hồ đó và gửi kèm thời điểm bắn; máy khách gắn đồng hồ bàn của mình vào tiến độ bay của rocket, nên lúc rocket chạm bàn thì bàn ở đúng tư thế trọng tài đã tính (đạn đuổi được trọng tài gửi kèm đồng hồ liên tục). Bot kiểm tra từng cách ngắm bằng mô phỏng và chờ đúng thời điểm.
 
 Mọi điều kiện của một lượt nằm trong một dictionary `env` (`Rules.roll_env`), do trọng tài tung rồi gửi cho mọi máy, nên vật lý, bot và hiển thị luôn khớp nhau. Bảng ở giữa trên hiển thị gió, trọng lực, độ dốc theo góc nhìn của từng người chơi.
 
 ## Đạn
-Phím `1` thường · `2` tẩy · `3` đuổi (chọn trong lượt của bạn). Mỗi loại đặc biệt chỉ dùng **1 lần/người/ván**.
+Phím `1` thường · `2` tẩy · `3` đuổi · `4` băng (chọn trong lượt của bạn). Mỗi loại đặc biệt chỉ dùng **1 lần/người/ván**.
 - **Đạn tẩy**: trúng dấu của đối thủ thì xóa dấu đó; trúng ô trống/dấu của mình thì mất lượt.
 - **Đạn đuổi**: sau khi bắn, rocket bị kéo về phía điểm tâm ngắm trên bàn cờ, di chuột để lái
   (lực kéo có giới hạn). Server mô phỏng thời gian thực theo hướng ngắm bạn gửi lên.
+- **Đạn băng** (chỉ Siêu khó): trúng bất kỳ ô nào trên bàn thì bàn **đứng yên ngay tại tư thế lúc trúng** trong `FREEZE_TURNS` = 4 lượt (2 lượt mỗi người, vì lượt kế tiếp là của đối thủ), không đặt dấu; hết băng bàn quay tiếp từ đúng tư thế đó. Bàn không được "nắn" về góc dễ bắn, nên phải chọn thời điểm bắn cho chính xác. Không bắn được khi bàn đang bị đóng băng. Bảng điều kiện hiện "ĐÓNG BĂNG · còn N lượt", bàn phủ lớp băng. Trọng tài phát `net_freeze` với góc của bàn tại thời điểm chạm (`tau` trong kết quả `step_flight`), rồi `roll_env(..., frozen)` giữ `omega = 0`.
 - HUD trên cùng hiển thị gió (mũi tên theo hướng *màn hình của bạn*) và trọng lực.
 
 ## Đăng lên itch.io
@@ -64,9 +65,23 @@ Phím `1` thường · `2` tẩy · `3` đuổi (chọn trong lượt của bạ
 3. Ảnh bìa và ảnh chụp có sẵn trong `itch/`, nội dung trang trong `itch/PAGE.md`.
 Lưu ý: itch chỉ lưu file tĩnh nên **chơi mạng không chạy sẵn trên itch** (không có máy chủ trận đấu). Bản itch chơi được với Bot và 2 người cùng máy. Muốn chơi mạng qua itch cần một máy chủ công khai có HTTPS (chạy `godot --headless -- --server` sau một reverse proxy hỗ trợ WebSocket, chuyển tiếp `/` có `Upgrade: websocket` vào cổng 24571) rồi nhập `wss://ten-mien.com` trong màn hình kết nối.
 
+## Chơi online: super-caro.kembabies.io.vn
+`./deploy/deploy.sh` chạy test luật, export bản web ở máy này, rsync lên VPS `<VPS_IP>` (`/home/deploy/kembabies/super-caro`) rồi `docker compose up -d --build`. Hai container: `super-caro-web` (nginx phục vụ file tĩnh đã nén gzip, `127.0.0.1:8792`; request có `Upgrade: websocket` được chuyển sang trọng tài) và `super-caro-game` (Godot 4.7.2 headless chạy `--server` từ chính `index.pck` vừa export, nên client và server luôn cùng phiên bản). Host Nginx giữ TLS. Vhost: `deploy/super-caro.kembabies.io.vn.conf` (cài một lần bằng sudo, xem đầu file). `./deploy/deploy.sh ps | logs | restart` để vận hành. Trên itch.io, nhập `wss://super-caro.kembabies.io.vn` ở màn kết nối là chơi mạng được.
+
 ## Điều khiển
-Chuột ngắm · click/Space bắn · chuột phải/Z zoom · 1/2/3 chọn đạn · mũi tên cũng ngắm · Esc tạm dừng.
-**Người chơi đứng cố định một chỗ** (cách bàn 160, riêng Siêu khó là 100): không có di chuyển. Máy chủ luôn bắn từ đúng chỗ đứng đó, bỏ qua vị trí mà máy khách gửi lên.
+Chuột ngắm · click/Space bắn · chuột phải/Z zoom · 1–4 chọn đạn · mũi tên cũng ngắm · Esc tạm dừng.
+**Người chơi không tự di chuyển** (cách bàn 160, riêng Siêu khó là 100; ở Rất khó bị đưa đi vòng quanh bàn). Máy chủ luôn bắn từ chỗ đứng do luật tính ra, bỏ qua vị trí mà máy khách gửi lên.
+
+## Skin
+Mỗi lần vào trận (Bot, 2 người, hoặc trước khi vào LAN) có màn **Chọn skin**, lựa chọn được nhớ (`Prefs.skins`). Danh mục nằm ở `scripts/core/skins.gd` (id dạng chuỗi để sau này gắn với tài khoản/cửa hàng):
+- **Bàn cờ**: Giấy cổ, Bảng phấn, Gỗ, Neon. Chỉ mình bạn thấy (mỗi máy vẽ bàn theo lựa chọn của mình).
+- **Dấu trên bàn**: Cổ điển X/O, Ngôi sao, Trái tim, Kim cương. Cùng kiểu cho cả hai đội, khác màu; vẽ trong `board.gdshader`.
+- **Hiệu ứng nổ**: Lửa, Pháo hoa, Kim tuyến, Điện. Đạn đặc biệt vẫn giữ màu riêng để nhận ra loại đạn.
+- **Vệt đường bay**: Khói, Lửa, Cầu vồng, Lấp lánh.
+Dấu, hiệu ứng nổ và vệt đường bay đi theo trận: máy khách gửi kèm `srv_hello`, trọng tài lọc qua `Skins.sanitize` rồi phát trong `net_new_match`. Bot chọn ngẫu nhiên. Thêm skin: thêm một dòng vào bảng tương ứng (và vào `loc.gd` cho tên tiếng Anh). Test nhanh: `-- --skin=neon,star,fireworks,rainbow` (không lưu).
+
+## Màn hình tải (web)
+`web/shell.html` thay trang tải mặc định của Godot (logo + thanh tiến trình trơn) bằng màn hình Rocket Caro: bàn caro nhỏ tự xếp 5 ô, rocket bay, thanh tiến trình có số MB, tự chọn tiếng Việt/Anh theo trình duyệt, tắt chuyển động khi hệ thống bật "giảm chuyển động". Boot splash của engine đã tắt (`application/boot_splash/show_image=false`) nên không còn logo Godot sau khi tải xong.
 
 ## Cấu trúc
 - `scripts/core/rules.gd` — luật, độ khó/`env`, vật lý đường đạn (kể cả bàn nghiêng), kiểm tra thắng, bot (thuần logic).
