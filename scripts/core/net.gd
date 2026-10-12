@@ -8,9 +8,10 @@ signal join_failed      ## client: could not reach the server
 signal host_lost        ## client: the server went away
 
 const PORT := 24571
+const PUBLIC_SERVER := "wss://super-caro.kembabies.io.vn"   ## for pages without a server of their own (itch.io)
 
 var player_name := ""
-var last_address := "127.0.0.1"
+var last_address := PUBLIC_SERVER
 
 
 func _ready() -> void:
@@ -77,7 +78,7 @@ func close() -> void:
 ## On the web the server is whoever served the page (host:port); on desktop, the last address used.
 func default_address() -> String:
 	if on_itch():
-		return last_address if "://" in last_address else ""   # itch has no game server of its own
+		return last_address if "://" in last_address else PUBLIC_SERVER   # itch has no game server of its own
 	if OS.has_feature("web") and _page("host") != "":
 		return _page("host")
 	return last_address

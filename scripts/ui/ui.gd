@@ -16,6 +16,10 @@ signal join_room_requested(room_id: int)
 signal quick_join_requested
 signal refresh_rooms_requested
 signal skins_changed           ## Prefs.skins changed (the board behind the menus shows the new look)
+signal look_dragged(relative: Vector2)   ## touch: a finger dragged to aim
+signal fire_pressed                      ## touch: the FIRE button
+signal zoom_pressed                      ## touch: the ZOOM button
+signal ammo_tapped(index: int)           ## the ammo bar was tapped (or clicked)
 
 const COL_ACCENT := Color("e9f48b")
 const COL_TEXT := Color("f5f2df")
@@ -61,13 +65,23 @@ var _over_sub: Label
 var _rematch_btn: Button
 var _warning_back := "menu"
 var _hide_check: CheckBox
-var _loadout_next := "bot"   ## what the skin screen's start button leads to: bot | local | lan
+var _loadout_next := "bot"   ## what the skin screen's start button leads to: bot | local | online
 var _loadout_go: Button
 var _skin_buttons := {}      ## kind -> Array of {id, button, label}
+## Phones and tablets: on-screen controls instead of mouse look. On from the start on a mobile
+## browser, and it follows whatever was used last (a touch, or a real mouse).
+var touch_mode := false
+var _touch: TouchControls
+var _controls_hint: Label
+var _rotate_hint: Control
+var _fullscreen_btn: Button
+var _last_touch_ms := -100000
+var _touch_forced := false   ## --touch: stay in touch mode whatever the mouse does
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	touch_mode = OS.has_feature("web_android") or OS.has_feature("web_ios") or OS.has_feature("mobile")
 	_build_all()
 	if Prefs.hide_warning:
 		show_menu()
@@ -94,6 +108,8 @@ func _build_all() -> void:
 	_build_wait_card()
 	_build_pause_card()
 	_build_over_card()
+	_build_rotate_hint()
+	_apply_touch_mode()
 
 
 ## Throws the whole interface away and builds it again, so every text is re-read in the current
@@ -101,7 +117,7 @@ func _build_all() -> void:
 func rebuild(card: String) -> void:
 	var hud_visible := _hud.visible
 	var warn_back := _warning_back
-	for n: Node in [_hud, _overlay, _crosshair, _compass, _flash]:
+	for n: Node in [_hud, _overlay, _crosshair, _compass, _flash, _rotate_hint]:
 		n.queue_free()
 	_build_all()
 	set_hud_visible(hud_visible)
@@ -139,10 +155,10 @@ func show_menu(message: String = "") -> void:
 	_show_card("menu")
 
 
-## The skin screen shown before a match; next is where its start button leads (bot | local | lan).
+## The skin screen shown before a match; next is where its start button leads (bot | local | online).
 func show_loadout(next: String) -> void:
 	_loadout_next = next
-	_loadout_go.text = Loc.t("Tiếp tục") if next == "lan" else Loc.t("Bắt đầu trận")
+	_loadout_go.text = Loc.t("Tiếp tục") if next == "online" else Loc.t("Bắt đầu trận")
 	_refresh_skin_buttons()
 	_show_card("loadout")
 
@@ -246,7 +262,7 @@ func debug_card(card_name: String) -> void:
 		show_waiting("Phòng «Phòng của Minh». Bạn là đội X. Đang chờ đối thủ vào phòng…")
 	elif card_name == "join":
 		show_join()
-		set_join_status("Kết nối thất bại. Kiểm tra IP, cùng mạng Wi-Fi, và server đã chạy chưa.")
+		set_join_status(Loc.t("Kết nối thất bại. Kiểm tra địa chỉ máy chủ và mạng của bạn, rồi thử lại."))
 	elif _cards.has(card_name):
 		_show_card(card_name)
 
@@ -321,6 +337,69 @@ func _unhandled_input(event: InputEvent) -> void:
 			elif _current == "pause":
 				resume_requested.emit()
 			get_viewport().set_input_as_handled()
+
+
+# --- touch ------------------------------------------------------------------------------------
+
+## Your turn (FIRE lit) and whether the camera is zoomed, for the on-screen buttons.
+func set_touch_state(can_fire: bool, zoomed: bool) -> void:
+	_touch.set_state(can_fire, zoomed)
+
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventScreenTouch or event is InputEventScreenDrag:
+		_last_touch_ms = Time.get_ticks_msec()
+		if not touch_mode:
+			touch_mode = true
+			_apply_touch_mode()
+			_touch._input(event)   # it was hidden when this touch went past it: hand it over
+	elif event is InputEventMouseMotion and touch_mode and not _touch_forced and event.device != InputEvent.DEVICE_ID_EMULATION:
+		# A real mouse took over. Browsers also send a stray mouse event right after a tap,
+		# so only believe it once the fingers have been quiet for a moment.
+		if Time.get_ticks_msec() - _last_touch_ms > 1500 and (event as InputEventMouseMotion).relative.length() > 2.0:
+			touch_mode = false
+			_apply_touch_mode()
+
+
+## Test helper (--touch): show the phone controls without a touch screen.
+func force_touch_mode() -> void:
+	_touch_forced = true
+	touch_mode = true
+	_apply_touch_mode()
+
+
+func _apply_touch_mode() -> void:
+	_touch.visible = touch_mode
+	_controls_hint.text = Loc.t("Kéo màn hình để ngắm · Nút BẮN để bắn\nChạm ô đạn để đổi đạn · Kính lúp để zoom") if touch_mode \
+		else Loc.t("Chuột ngắm · Click/Space bắn\n1-4 chọn đạn · Chuột phải/Z zoom\nEsc tạm dừng")
+	_fullscreen_btn.visible = touch_mode and OS.has_feature("web") and not OS.has_feature("web_ios")
+
+
+## Held upright, a phone shows the 16:9 arena as a thin strip: ask for landscape instead.
+func _build_rotate_hint() -> void:
+	var bg := ColorRect.new()
+	bg.color = Color(0.043, 0.125, 0.153, 0.97)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.visible = false
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.add_child(center)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 16)
+	center.add_child(col)
+	var title := _label("ROCKET CARO.", 96, COL_ACCENT)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(title)
+	var text := _para(Loc.t("Xoay ngang điện thoại để chơi."), COL_TEXT, 64, 1000)
+	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(text)
+	add_child(bg)
+	_rotate_hint = bg
+
+
+func _process(_delta: float) -> void:
+	var s := get_viewport().get_visible_rect().size
+	_rotate_hint.visible = touch_mode and s.y > s.x
 
 
 # --- widget helpers ---------------------------------------------------------------------------
@@ -582,7 +661,8 @@ func _build_hud() -> void:
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	minimap = Minimap.new()
 	left.add_child(minimap)
-	left.add_child(_label(Loc.t("Chuột ngắm · Click/Space bắn\n1-4 chọn đạn · Chuột phải/Z zoom\nEsc tạm dừng"), 12, COL_DIM))
+	_controls_hint = _label("", 12, COL_DIM)
+	left.add_child(_controls_hint)
 	bottom.add_child(left)
 	var center := VBoxContainer.new()
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -605,6 +685,14 @@ func _build_hud() -> void:
 	pause_btn.pressed.connect(func() -> void: pause_requested.emit())
 	right.add_child(pause_btn)
 	bottom.add_child(right)
+
+	_touch = TouchControls.new()
+	_touch.blockers.append(pause_btn)
+	_touch.blockers.append_array(_ammo_panels)
+	_touch.look.connect(func(rel: Vector2) -> void: look_dragged.emit(rel))
+	_touch.fire.connect(func() -> void: fire_pressed.emit())
+	_touch.zoom.connect(func() -> void: zoom_pressed.emit())
+	_hud.add_child(_touch)
 
 	_crosshair = _label("+", 30)
 	_crosshair.set_anchors_preset(Control.PRESET_CENTER)
@@ -644,7 +732,11 @@ func _build_ammo_bar() -> HBoxContainer:
 	for name_key in AMMO_NAMES:
 		var name_text := Loc.t(name_key)
 		var panel := PanelContainer.new()
-		panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var index := _ammo_panels.size()
+		# Tappable, so phones can switch ammo without number keys.
+		panel.gui_input.connect(func(e: InputEvent) -> void:
+			if e is InputEventMouseButton and (e as InputEventMouseButton).pressed and (e as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+				ammo_tapped.emit(index))
 		var label := _label(name_text, 14)
 		panel.add_child(label)
 		row.add_child(panel)
@@ -720,6 +812,12 @@ func _build_menu_card() -> void:
 	small.add_child(how)
 	small.add_child(cfg)
 	left.add_child(small)
+	# Phones lose a lot of screen to the browser bar. (iPhone Safari has no fullscreen for pages.)
+	_fullscreen_btn = _button(Loc.t("Toàn màn hình"), false)
+	_fullscreen_btn.pressed.connect(func() -> void:
+		var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if full else DisplayServer.WINDOW_MODE_FULLSCREEN))
+	left.add_child(_fullscreen_btn)
 
 	# right: pick a mode
 	var right := VBoxContainer.new()
@@ -732,11 +830,11 @@ func _build_menu_card() -> void:
 	_menu_msg = _para("", Color("ffb199"), 14, 460)
 	right.add_child(_menu_msg)
 	# Every mode goes through the skin screen first.
-	var lan := _mode_button(Loc.t("Chơi mạng LAN"), Loc.t("Vào sảnh phòng, đấu với bạn bè cùng Wi-Fi."), true)
-	lan.pressed.connect(func() -> void:
+	var online := _mode_button(Loc.t("Chơi online"), Loc.t("Vào sảnh phòng, đấu với bạn bè ở bất cứ đâu."), true)
+	online.pressed.connect(func() -> void:
 		_commit_name()
-		show_loadout("lan"))
-	right.add_child(lan)
+		show_loadout("online"))
+	right.add_child(online)
 	var bot := _mode_button(Loc.t("Chơi với Bot"), Loc.t("Luyện tập một mình. Bot biết dùng cả đạn đặc biệt."), false)
 	bot.pressed.connect(func() -> void:
 		_commit_name()
@@ -797,8 +895,12 @@ func _build_loadout_card() -> void:
 	_loadout_go.custom_minimum_size = Vector2(0, 54)
 	_loadout_go.add_theme_font_size_override("font_size", 18)
 	_loadout_go.pressed.connect(func() -> void:
-		if _loadout_next == "lan":
+		if _loadout_next == "online":
 			show_join()
+			# On the web the server is known (the page's own, or the public one on itch): go
+			# straight to the lobby. The address screen only matters if that fails.
+			if OS.has_feature("web") and _ip_edit.text.strip_edges() != "":
+				join_requested.emit(_ip_edit.text.strip_edges())
 		elif _loadout_next == "local":
 			local_requested.emit()
 		else:
@@ -825,11 +927,8 @@ func _commit_name() -> void:
 
 func _build_join_card() -> void:
 	var box := _make_card("join", 620)
-	_header(box, Loc.t("Chơi mạng LAN"), Loc.t("Quay lại"), func() -> void: show_menu())
-	if Net.on_itch():
-		box.add_child(_para(Loc.t("Trang itch.io chỉ lưu file game, không có máy chủ trận đấu. Để chơi mạng, nhập địa chỉ một máy chủ Rocket Caro có HTTPS, dạng wss://ten-mien.com (xem README). Không có máy chủ thì hãy chơi với Bot hoặc 2 người cùng máy."), Color("ffd9a0"), 14, 548))
-	else:
-		box.add_child(_para(Loc.t("Nhập địa chỉ máy chủ, là máy đang chạy ./play_lan.sh. Nếu bạn mở game từ trang web của máy chủ thì địa chỉ đã được điền sẵn."), COL_MUTED, 14, 548))
+	_header(box, Loc.t("Chơi online"), Loc.t("Quay lại"), func() -> void: show_menu())
+	box.add_child(_para(Loc.t("Máy chủ công khai: %s. Bạn cũng có thể nhập máy chủ khác, ví dụ IP của máy đang chạy ./play_lan.sh trong mạng LAN.") % Net.PUBLIC_SERVER, COL_MUTED, 14, 548))
 	box.add_child(_label(Loc.t("ĐỊA CHỈ MÁY CHỦ"), 11, COL_DIM))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
@@ -907,7 +1006,7 @@ func _build_howto_card() -> void:
 		[Loc.t("GIÓ, TRỌNG LỰC, ĐỘ DỐC"), Loc.t("Bảng ở giữa trên cho biết điều kiện lượt này theo màn hình của bạn: mũi tên vàng là gió, mũi tên đỏ là trọng lực, hình bàn nghiêng là độ dốc. Hãy ngắm bù ngược lại: gió đẩy sang phải thì ngắm lệch sang trái, và ngắm cao hơn một chút.")],
 		[Loc.t("ĐỘ KHÓ"), Loc.t("Bình thường: không gió, không trọng lực.\nKhó: có gió và trọng lực.\nRất khó: bàn cờ nghiêng (dốc) và xoay, đổi mỗi lượt, còn bạn bị đưa đi vòng quanh bàn cờ liên tục trong lúc ngắm: có lúc thấy bàn chính diện, có lúc chỉ thấy cạnh bàn hoặc mặt sau. Chờ bàn dừng rồi mới bắn được.\nSiêu khó: gió, trọng lực, và bàn cờ lật, quay liên tục rất nhanh. Rocket bay mất khoảng 1 giây nên phải bắn đón đầu: hãy nhìn hình bàn quay trên bảng điều kiện và chọn lúc ô muốn bắn sắp tới đúng chỗ.")],
 		[Loc.t("ĐẠN ĐẶC BIỆT (mỗi loại 1 lần mỗi ván)"), Loc.t("Phím 2, đạn tẩy: bắn trúng dấu của đối thủ để xóa nó.\nPhím 3, đạn đuổi: sau khi bắn, di chuột để lái rocket về ô muốn trúng.\nPhím 4, đạn băng (chỉ ở Siêu khó): trúng bàn cờ là bàn đứng yên ngay tại tư thế lúc trúng trong %d lượt, không đặt dấu. Chọn đúng lúc bắn: bàn có thể đông cứng ở góc rất khó bắn.\nPhím 1 quay về đạn thường.") % Rules.FREEZE_TURNS],
-		[Loc.t("ĐIỀU KHIỂN"), Loc.t("Chuột ngắm · click hoặc Space bắn · chuột phải hoặc Z zoom · 1-4 chọn đạn · Esc tạm dừng. Bạn không tự di chuyển được.")],
+		[Loc.t("ĐIỀU KHIỂN"), Loc.t("Chuột ngắm · click hoặc Space bắn · chuột phải hoặc Z zoom · 1-4 chọn đạn · Esc tạm dừng. Bạn không tự di chuyển được.\nĐiện thoại (cầm ngang): kéo màn hình để ngắm, nút BẮN để bắn, nút kính lúp để zoom, chạm vào ô đạn để đổi đạn. Có thể vừa kéo ngắm vừa bấm bắn bằng hai tay.")],
 	]
 	for sec in sections:
 		box.add_child(_label(sec[0], 11, COL_ACCENT))

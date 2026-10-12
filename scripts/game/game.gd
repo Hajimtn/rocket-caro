@@ -140,6 +140,12 @@ func bind_ui(u: Ui) -> void:
 		else:
 			_auth_begin_match())
 	ui.skins_changed.connect(func() -> void: world.set_board_skin(Prefs.skins["board"]))
+	ui.look_dragged.connect(rig.touch_look)
+	ui.fire_pressed.connect(rig.request_fire)
+	ui.zoom_pressed.connect(func() -> void:
+		if rig.active:
+			rig.set_zoom(not rig.zoom))
+	ui.ammo_tapped.connect(_on_ammo_selected)
 
 
 ## Developer shortcuts for scripted multi-process tests (pass after `--`).
@@ -156,6 +162,8 @@ func run_cli(args: PackedStringArray) -> void:
 			ui.debug_card(a.get_slice("=", 1))
 		elif a == "--nomouse":
 			_no_mouse = true
+		elif a == "--touch":
+			ui.force_touch_mode()
 		elif a == "--nopause":
 			_no_pause = true
 		elif a == "--bot":
@@ -248,7 +256,7 @@ func leave_room(message: String) -> void:
 func _on_join_failed() -> void:
 	Net.close()
 	ui.show_join()
-	ui.set_join_status(Loc.t("Kết nối thất bại. Kiểm tra IP, cùng mạng Wi-Fi, và server đã chạy chưa."))
+	ui.set_join_status(Loc.t("Kết nối thất bại. Kiểm tra địa chỉ máy chủ và mạng của bạn, rồi thử lại."))
 
 
 func _on_host_lost() -> void:
@@ -1001,7 +1009,8 @@ func _sync_input_and_hud() -> void:
 		rig.ride(Rules.shooter_azimuth(env, team, _turn_age), float(env["start_z"]))
 	var overlay := ui.overlay_open()
 	rig.active = not overlay and phase != Phase.IDLE
-	var want := Input.MOUSE_MODE_VISIBLE if overlay or phase == Phase.IDLE or _no_mouse else Input.MOUSE_MODE_CAPTURED
+	# Touch screens aim with the on-screen controls, so the mouse is never grabbed there.
+	var want := Input.MOUSE_MODE_VISIBLE if overlay or phase == Phase.IDLE or _no_mouse or ui.touch_mode else Input.MOUSE_MODE_CAPTURED
 	if Input.mouse_mode != want:
 		# A browser only grants pointer lock after a click, and an iframe (itch.io) may refuse it
 		# outright, so on the web retry at a gentle pace; a click on the game also grabs the mouse.
@@ -1049,6 +1058,7 @@ func _sync_input_and_hud() -> void:
 	for k in Rules.AMMO_COUNT:
 		usable.append(_ammo_ok(team, k))
 	ui.set_ammo(selected_ammo, usable, _used[team], mine, difficulty >= Rules.DIFF_INSANE)
+	ui.set_touch_state(mine, rig.zoom)
 	var mm := ui.minimap
 	mm.board = board
 	mm.last = last_cell

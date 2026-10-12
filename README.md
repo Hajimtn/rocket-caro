@@ -15,19 +15,19 @@ Mở thư mục này bằng Godot 4.7 rồi bấm Play (F5).
 
 ## Menu
 Màn hình chính chia hai cột: bên trái là tên bạn (tự lưu), *Cách chơi* và *Cài đặt* (độ nhạy chuột, âm lượng, lưu trên máy);
-bên phải là ba chế độ: *Chơi mạng LAN*, *Chơi với Bot*, *2 người · cùng máy*. Mọi màn hình con đều có nút quay lại ở góc trên trái.
-Luồng LAN: Kết nối (địa chỉ máy chủ, tự điền khi mở từ trang web của máy chủ) → Sảnh phòng → phòng chờ/trận.
+bên phải là ba chế độ: *Chơi online*, *Chơi với Bot*, *2 người · cùng máy*. Mọi màn hình con đều có nút quay lại ở góc trên trái.
+Luồng online: Chọn skin → Sảnh phòng → phòng chờ/trận. Trên web game tự kết nối tới máy chủ (máy chủ đã phục vụ trang, hoặc `Net.PUBLIC_SERVER` = `wss://super-caro.kembabies.io.vn` khi chạy trên itch.io); màn nhập địa chỉ chỉ hiện ra khi kết nối lỗi, hoặc ở bản desktop.
 Cài đặt lưu ở `user://settings.cfg` (script `scripts/core/prefs.gd`).
 
 ## Chế độ chơi
 - **Đấu với bot** và **2 người · cùng máy** (offline, chạy được cả trên web).
-- **Chơi mạng LAN** (web hoặc desktop):
+- **Chơi online** qua máy chủ công khai https://super-caro.kembabies.io.vn (xem mục bên dưới), hoặc tự dựng máy chủ trong mạng LAN (web hoặc desktop):
   1. Trên một máy trong mạng chạy `./play_lan.sh` (thêm `--rebuild` nếu vừa sửa code). Script bật
      web server HTTPS (cổng 8443) + HTTP cho chính máy này (cổng 8060) và server trọng tài
      (WebSocket nội bộ cổng 24571, được tunnel qua chính cổng web), rồi in ra URL.
   2. Máy khác mở `https://192.168.x.x:8443`. Trình duyệt cảnh báo chứng chỉ tự ký (bấm
      *Nâng cao → Tiếp tục truy cập*, chỉ một lần): Godot web bắt buộc "secure context" (HTTPS hoặc
-     localhost) nên không thể dùng http://IP-LAN. Rồi bấm *Chơi mạng LAN → Vào phòng*
+     localhost) nên không thể dùng http://IP-LAN. Rồi bấm *Chơi online*
      (địa chỉ tự điền).
   3. Sảnh phòng: danh sách phòng cập nhật trực tiếp (tên, số người, tên người trong phòng,
      đang đấu hay chưa). *Tạo phòng* (tên tùy chọn), bấm vào phòng còn chỗ để vào, hoặc *Vào nhanh*
@@ -38,11 +38,11 @@ Cài đặt lưu ở `user://settings.cfg` (script `scripts/core/prefs.gd`).
      *Rời trận* đưa bạn về sảnh mà không mất kết nối; hết ván bấm *Chơi lại* để đấu tiếp cùng phòng.
   - Bản desktop (F5 trong Godot) cũng vào được: nhập IP máy chạy server.
   - Cho phép kết nối đến qua tường lửa macOS khi được hỏi (python3 và Godot).
-  - Chưa hỗ trợ cảm ứng/điện thoại (cần chuột + bàn phím).
+  - Điện thoại/máy tính bảng: chơi được trên trình duyệt, cầm ngang (xem mục *Điện thoại* bên dưới).
 
 ## Độ khó
 **Khoảng cách:** ở Bình thường, Khó, Rất khó, người chơi đứng cách bàn **160** (xa), nên rocket bay lâu hơn (~1.6 giây), gió làm lệch nhiều hơn và bàn trông nhỏ hơn (chuột phải/Z để zoom). Siêu khó giữ khoảng cách **100**. Chỉnh ở `START_Z_FAR` / `START_Z_NEAR` trong `scripts/core/rules.gd`.
-Chọn ở menu chính (chơi bot / 2 người) hoặc khi tạo phòng LAN; lựa chọn được nhớ. Mỗi mức gồm mức trước cộng thêm:
+Chọn ở menu chính (chơi bot / 2 người) hoặc khi tạo phòng online; lựa chọn được nhớ. Mỗi mức gồm mức trước cộng thêm:
 - **Bình thường**: không gió, không trọng lực (rocket bay thẳng).
 - **Khó**: gió + trọng lực, đổi gió mỗi lượt.
 - **Rất khó**: bàn cờ nghiêng mạnh và xoay quanh trục đứng (9°–34°), đổi mỗi lượt. Độ dốc tính theo người bắn: ngả ra xa 17°–46°, hoặc ngả vào gần nhẹ hơn (17°–23°, vì ngả vào gần mạnh sẽ che kín màn hình); bàn mất 0.8 giây để chuyển góc và trong lúc đó chưa bắn được. **Đồng thời người bắn bị đưa đi vòng quanh bàn cờ liên tục** (bán kính 160, 0.30–0.50 rad/s, một vòng khoảng 12–21 giây, chiều và điểm xuất phát ngẫu nhiên mỗi lượt). Thân người luôn quay mặt về tâm bàn, chuột vẫn ngắm như thường; có lúc thấy bàn chính diện, có lúc chỉ thấy cạnh bàn hoặc mặt sau (bị lật gương). Vòng quay dừng khi rocket rời nòng. Gió, độ dốc và minimap hiển thị theo chỗ đang đứng; có dòng gợi ý "Bàn ở bên trái/phải" khi bạn nhìn lạc hướng. Vị trí là hàm của thời gian trong lượt (`Rules.shooter_pos`): máy khách gửi kèm thời điểm bắn, trọng tài chấp nhận nếu trễ không quá 0.5 giây rồi tự tính chỗ đứng.
@@ -63,17 +63,17 @@ Phím `1` thường · `2` tẩy · `3` đuổi · `4` băng (chọn trong lư�
 1. `./export_itch.sh` tạo `build/itch/rocket-caro-web.zip` (khoảng 10 MB, `index.html` nằm ở gốc zip).
 2. itch.io → *Upload new project*: Kind of project = **HTML**, tải zip lên, tick *This file will be played in the browser*, viewport 1280×720, bật *Fullscreen button*.
 3. Ảnh bìa và ảnh chụp có sẵn trong `itch/`, nội dung trang trong `itch/PAGE.md`.
-Lưu ý: itch chỉ lưu file tĩnh nên **chơi mạng không chạy sẵn trên itch** (không có máy chủ trận đấu). Bản itch chơi được với Bot và 2 người cùng máy. Muốn chơi mạng qua itch cần một máy chủ công khai có HTTPS (chạy `godot --headless -- --server` sau một reverse proxy hỗ trợ WebSocket, chuyển tiếp `/` có `Upgrade: websocket` vào cổng 24571) rồi nhập `wss://ten-mien.com` trong màn hình kết nối.
+Lưu ý: itch chỉ lưu file tĩnh, nên bản itch chơi online qua máy chủ công khai `wss://super-caro.kembabies.io.vn` (`Net.PUBLIC_SERVER`); máy chủ đó tắt thì bản itch chỉ còn chơi với Bot và 2 người cùng máy. Muốn dùng máy chủ khác: chạy `godot --headless -- --server` sau một reverse proxy có HTTPS hỗ trợ WebSocket (xem `deploy/`) rồi nhập `wss://ten-mien` trong màn kết nối.
 
 ## Chơi online: super-caro.kembabies.io.vn
-`./deploy/deploy.sh` chạy test luật, export bản web ở máy này, rsync lên VPS `<VPS_IP>` (`/home/deploy/kembabies/super-caro`) rồi `docker compose up -d --build`. Hai container: `super-caro-web` (nginx phục vụ file tĩnh đã nén gzip, `127.0.0.1:8792`; request có `Upgrade: websocket` được chuyển sang trọng tài) và `super-caro-game` (Godot 4.7.2 headless chạy `--server` từ chính `index.pck` vừa export, nên client và server luôn cùng phiên bản). Host Nginx giữ TLS. Vhost: `deploy/super-caro.kembabies.io.vn.conf` (cài một lần bằng sudo, xem đầu file). `./deploy/deploy.sh ps | logs | restart` để vận hành. Trên itch.io, nhập `wss://super-caro.kembabies.io.vn` ở màn kết nối là chơi mạng được.
+`./deploy/deploy.sh` chạy test luật, export bản web ở máy này, rsync lên VPS `<VPS_IP>` (`/home/deploy/kembabies/super-caro`) rồi `docker compose up -d --build`. Hai container: `super-caro-web` (nginx phục vụ file tĩnh đã nén gzip, `127.0.0.1:8792`; request có `Upgrade: websocket` được chuyển sang trọng tài) và `super-caro-game` (Godot 4.7.2 headless chạy `--server` từ chính `index.pck` vừa export, nên client và server luôn cùng phiên bản). Host Nginx giữ TLS. Vhost: `deploy/super-caro.kembabies.io.vn.conf` (cài một lần bằng sudo, xem đầu file). `./deploy/deploy.sh ps | logs | restart` để vận hành. Bản trên itch.io cũng tự kết nối tới máy chủ này.
 
 ## Điều khiển
 Chuột ngắm · click/Space bắn · chuột phải/Z zoom · 1–4 chọn đạn · mũi tên cũng ngắm · Esc tạm dừng.
 **Người chơi không tự di chuyển** (cách bàn 160, riêng Siêu khó là 100; ở Rất khó bị đưa đi vòng quanh bàn). Máy chủ luôn bắn từ chỗ đứng do luật tính ra, bỏ qua vị trí mà máy khách gửi lên.
 
 ## Skin
-Mỗi lần vào trận (Bot, 2 người, hoặc trước khi vào LAN) có màn **Chọn skin**, lựa chọn được nhớ (`Prefs.skins`). Danh mục nằm ở `scripts/core/skins.gd` (id dạng chuỗi để sau này gắn với tài khoản/cửa hàng):
+Mỗi lần vào trận (Bot, 2 người, hoặc trước khi vào online) có màn **Chọn skin**, lựa chọn được nhớ (`Prefs.skins`). Danh mục nằm ở `scripts/core/skins.gd` (id dạng chuỗi để sau này gắn với tài khoản/cửa hàng):
 - **Bàn cờ**: Giấy cổ, Bảng phấn, Gỗ, Neon. Chỉ mình bạn thấy (mỗi máy vẽ bàn theo lựa chọn của mình).
 - **Dấu trên bàn**: Cổ điển X/O, Ngôi sao, Trái tim, Kim cương. Cùng kiểu cho cả hai đội, khác màu; vẽ trong `board.gdshader`.
 - **Hiệu ứng nổ**: Lửa, Pháo hoa, Kim tuyến, Điện. Đạn đặc biệt vẫn giữ màu riêng để nhận ra loại đạn.
@@ -82,6 +82,14 @@ Dấu, hiệu ứng nổ và vệt đường bay đi theo trận: máy khách g�
 
 ## Màn hình tải (web)
 `web/shell.html` thay trang tải mặc định của Godot (logo + thanh tiến trình trơn) bằng màn hình Rocket Caro: bàn caro nhỏ tự xếp 5 ô, rocket bay, thanh tiến trình có số MB, tự chọn tiếng Việt/Anh theo trình duyệt, tắt chuyển động khi hệ thống bật "giảm chuyển động". Boot splash của engine đã tắt (`application/boot_splash/show_image=false`) nên không còn logo Godot sau khi tải xong.
+
+## Điện thoại
+Chạm màn hình là game chuyển sang điều khiển cảm ứng (`scripts/ui/touch_controls.gd`); dùng lại chuột thật thì quay về khóa chuột như cũ. Trên trình duyệt Android/iOS thì bật sẵn từ đầu.
+- Kéo một ngón ở bất kỳ đâu để ngắm (cả lúc lái đạn đuổi), nút **BẮN** to bên phải, nút kính lúp để zoom, chạm vào ô đạn để đổi đạn, nút *Tạm dừng* thay cho Esc.
+- Đa chạm: một ngón vừa giữ ngắm, ngón kia bấm BẮN. (GUI có sẵn của Godot chỉ thấy ngón đầu tiên, nên các nút này đọc thẳng `InputEventScreenTouch/Drag`.)
+- Cầm dọc thì hiện nhắc xoay ngang. Menu có nút *Toàn màn hình* (Android; Safari trên iPhone không cho trang web toàn màn hình). Bàn phím ảo được bật (`html/experimental_virtual_keyboard`) để nhập tên.
+- Độ nhạy kéo: `TOUCH_SENS` trong `fps_rig.gd`, nhân với độ nhạy trong *Cài đặt*.
+- Test: `godot --headless --path . --script tools/test_touch.gd -- --bot --nowarn --nopause --diff=1` (chạm giả trong một trận thật). Xem giao diện điện thoại trên máy tính: `-- --touch` (kèm `--resolution 1688x780`).
 
 ## Cấu trúc
 - `scripts/core/rules.gd` — luật, độ khó/`env`, vật lý đường đạn (kể cả bàn nghiêng), kiểm tra thắng, bot (thuần logic).

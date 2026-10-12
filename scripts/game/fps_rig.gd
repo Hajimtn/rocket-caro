@@ -8,6 +8,7 @@ signal ammo_selected(index: int)
 
 const LOOK_SENS := 0.0017
 const LOOK_SENS_ZOOM := 0.00055
+const TOUCH_SENS := 0.0022        ## rad per dragged pixel (a finger covers less ground than a mouse)
 const FOV_NORMAL := 61.0
 const FOV_ZOOM := 22.6
 const PITCH_MIN := -0.35
@@ -138,7 +139,9 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not active:
+	# Touches arrive as touches (see TouchControls) and again as fake mouse events; only the
+	# first kind counts, or every tap would try to grab the mouse.
+	if not active or event.device == InputEvent.DEVICE_ID_EMULATION:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if Time.get_ticks_msec() < _look_ok_at:
@@ -166,6 +169,21 @@ func _unhandled_input(event: InputEvent) -> void:
 				_request_fire()
 			elif k.physical_keycode >= KEY_1 and k.physical_keycode < KEY_1 + Rules.AMMO_COUNT:
 				ammo_selected.emit(k.physical_keycode - KEY_1)
+
+
+## A finger dragged across the screen (touch controls).
+func touch_look(relative: Vector2) -> void:
+	if not active:
+		return
+	var s := TOUCH_SENS * (LOOK_SENS_ZOOM / LOOK_SENS if zoom else 1.0) * Prefs.sensitivity
+	var rel := relative.limit_length(200.0)
+	yaw += rel.x * s
+	pitch = clampf(pitch - rel.y * s, PITCH_MIN, PITCH_MAX)
+
+
+func request_fire() -> void:
+	if active:
+		_request_fire()
 
 
 func _request_fire() -> void:

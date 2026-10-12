@@ -23,7 +23,7 @@ Caro khổng lồ 15×15, đặt dấu bằng rocket. Gió, trọng lực và c�
 - Hai đạn đặc biệt, mỗi loại dùng 1 lần mỗi ván: **đạn tẩy** xóa một dấu của đối thủ, **đạn đuổi** cho bạn lái rocket bằng chuột sau khi bắn.
 
 **Chế độ chơi (bản trên trang này):** chơi với Bot, hoặc 2 người thay phiên trên cùng một máy.
-**Chơi mạng LAN** cần chạy máy chủ riêng (xem hướng dẫn trong bản tải về / README); trang itch.io chỉ lưu file game nên không tự có máy chủ.
+**Chơi online**: game tự kết nối tới máy chủ công khai `wss://super-caro.kembabies.io.vn`, rủ bạn bè mở trang này là đấu được. Muốn chơi trong mạng LAN thì chạy máy chủ riêng (xem README).
 
 ## Điều khiển
 | | |
