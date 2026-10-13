@@ -20,6 +20,8 @@ signal look_dragged(relative: Vector2)   ## touch: a finger dragged to aim
 signal fire_pressed                      ## touch: the FIRE button
 signal zoom_pressed                      ## touch: the ZOOM button
 signal ammo_tapped(index: int)           ## the ammo bar was tapped (or clicked)
+signal find_requested                    ## look for a match (matchmaking)
+signal cancel_find_requested
 
 const COL_ACCENT := Color("e9f48b")
 const COL_TEXT := Color("f5f2df")
@@ -68,6 +70,21 @@ var _hide_check: CheckBox
 var _loadout_next := "bot"   ## what the skin screen's start button leads to: bot | local | online
 var _loadout_go: Button
 var _skin_buttons := {}      ## kind -> Array of {id, button, label}
+var _account_box: VBoxContainer   ## menu: guest name, or who is logged in
+var _acc_register := false        ## account screen: creating an account (else logging in)
+var _acc_tabs: Array[Button] = []
+var _acc_name: LineEdit
+var _acc_pass: LineEdit
+var _acc_pass2: LineEdit
+var _acc_pass2_label: Label
+var _acc_status: Label
+var _acc_go: Button
+var _rooms_who: Label
+var _search_info: Label
+var _search_others: Label
+var _search_rated: Label
+var _search_since := 0.0
+var _over_rating: Label
 ## Phones and tablets: on-screen controls instead of mouse look. On from the start on a mobile
 ## browser, and it follows whatever was used last (a touch, or a real mouse).
 var touch_mode := false
@@ -81,6 +98,10 @@ var _touch_forced := false   ## --touch: stay in touch mode whatever the mouse d
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	Account.changed.connect(_on_account_changed)
+	Account.failed.connect(func(message: String) -> void:
+		_acc_status.text = message
+		_acc_go.disabled = false)
 	touch_mode = OS.has_feature("web_android") or OS.has_feature("web_ios") or OS.has_feature("mobile")
 	_build_all()
 	if Prefs.hide_warning:
@@ -105,6 +126,8 @@ func _build_all() -> void:
 	_build_settings_card()
 	_build_warning_card()
 	_build_rooms_card()
+	_build_search_card()
+	_build_account_card()
 	_build_wait_card()
 	_build_pause_card()
 	_build_over_card()
@@ -173,7 +196,33 @@ func show_join() -> void:
 func show_rooms() -> void:
 	_rooms_status.text = ""
 	_rooms_status.visible = false
+	_refresh_rooms_who()
 	_show_card("rooms")
+
+
+## Matchmaking is on: waiting = how many others are looking at the same difficulty.
+func show_search(waiting: int) -> void:
+	if _current != "search":
+		_search_since = Time.get_ticks_msec() / 1000.0
+	_search_others.text = Loc.t("Có %d người khác đang tìm trận ở độ khó này.") % waiting if waiting > 0 \
+		else Loc.t("Chưa có ai khác đang tìm ở độ khó này. Rủ bạn bè mở trang game nhé!")
+	_search_rated.text = Loc.t("Gặp người cũng có tài khoản thì trận được tính Elo.") if Account.logged_in() \
+		else Loc.t("Bạn đang là khách: trận sẽ không được tính Elo. Đăng nhập ở menu chính để được tính.")
+	_update_search_time()
+	_show_card("search")
+
+
+func show_account() -> void:
+	_set_account_mode(_acc_register)
+	_acc_status.text = ""
+	_acc_go.disabled = false
+	_show_card("account")
+
+
+## The rating change after a rated game (shown on the game-over screen); 0, 0 clears it.
+func set_rating_change(before: int, after: int) -> void:
+	_over_rating.visible = before != 0 or after != 0
+	_over_rating.text = Loc.t("Elo %d → %d (%+d)") % [before, after, after - before]
 
 
 func set_rooms_status(text: String) -> void:
@@ -190,7 +239,7 @@ func set_room_list(list: Array) -> void:
 	sorted_list.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["count"]) < int(b["count"]))
 	for room: Dictionary in sorted_list:
 		_room_list.add_child(_room_row(room))
-	_rooms_scroll.custom_minimum_size.y = clampf(list.size() * 62.0, 0.0, 250.0)
+	_rooms_scroll.custom_minimum_size.y = clampf(list.size() * 62.0, 0.0, 190.0)
 
 
 ## One room = one plain row: name, who is in it, and a single action on the right.
@@ -246,6 +295,10 @@ func debug_card(card_name: String) -> void:
 		show_warning("menu")
 	elif card_name == "settings":
 		show_settings("menu")
+	elif card_name == "account":
+		show_account()
+	elif card_name == "search":
+		show_search(2)
 	elif card_name == "loadout":
 		show_loadout("bot")
 	elif card_name == "rooms":
@@ -400,6 +453,8 @@ func _build_rotate_hint() -> void:
 func _process(_delta: float) -> void:
 	var s := get_viewport().get_visible_rect().size
 	_rotate_hint.visible = touch_mode and s.y > s.x
+	if _current == "search" and _overlay.visible:
+		_update_search_time()
 
 
 # --- widget helpers ---------------------------------------------------------------------------
@@ -793,14 +848,10 @@ func _build_menu_card() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(spacer)
-	left.add_child(_label(Loc.t("TÊN CỦA BẠN"), 11, COL_DIM))
-	_name_edit = LineEdit.new()
-	_name_edit.text = Net.player_name
-	_name_edit.max_length = 16
-	_name_edit.placeholder_text = Loc.t("Nhập tên hiển thị")
-	_name_edit.text_changed.connect(func(_t: String) -> void: _commit_name())
-	_style_edit(_name_edit)
-	left.add_child(_name_edit)
+	_account_box = VBoxContainer.new()
+	_account_box.add_theme_constant_override("separation", 8)
+	left.add_child(_account_box)
+	_refresh_account_box()
 	var small := HBoxContainer.new()
 	small.add_theme_constant_override("separation", 8)
 	var how := _button(Loc.t("Cách chơi"), false)
@@ -918,6 +969,8 @@ func _refresh_skin_buttons() -> void:
 
 
 func _commit_name() -> void:
+	if not is_instance_valid(_name_edit) or not _name_edit.is_inside_tree():
+		return   # logged in: the account name is used
 	var n := _name_edit.text.strip_edges()
 	if n != "":
 		Net.player_name = n
@@ -952,20 +1005,25 @@ func _build_join_card() -> void:
 
 func _build_rooms_card() -> void:
 	var box := _make_card("rooms", 560)
-	_header(box, Loc.t("Chọn phòng"), Loc.t("Thoát"), func() -> void: disconnect_requested.emit())
+	box.add_theme_constant_override("separation", 10)
+	_header(box, Loc.t("Chơi online"), Loc.t("Thoát"), func() -> void: disconnect_requested.emit())
 	_rooms_status = _para("", Color("ffb199"), 14, 488)
 	_rooms_status.visible = false
 	box.add_child(_rooms_status)
+	_rooms_who = _para("", COL_MUTED, 13, 488)
+	box.add_child(_rooms_who)
 
-	# The one thing most people want: get into a game right now.
-	var quick := _button(Loc.t("Chơi ngay"), true)
-	quick.custom_minimum_size = Vector2(0, 58)
-	quick.add_theme_font_size_override("font_size", 18)
-	quick.pressed.connect(func() -> void: quick_join_requested.emit())
-	box.add_child(quick)
-	box.add_child(_para(Loc.t("Tự ghép với người đang chờ, hoặc mở phòng mới (theo độ khó chọn bên dưới) nếu chưa có ai."), COL_DIM, 12, 488))
+	box.add_child(_label(Loc.t("ĐỘ KHÓ"), 11, COL_DIM))
+	_build_picker(box, 488)
+	# The one thing most people want: a game against someone, right now.
+	var find := _button(Loc.t("Tìm trận"), true)
+	find.custom_minimum_size = Vector2(0, 58)
+	find.add_theme_font_size_override("font_size", 18)
+	find.pressed.connect(func() -> void: find_requested.emit())
+	box.add_child(find)
+	box.add_child(_para(Loc.t("Ghép với một người đang tìm trận cùng độ khó. Trận giữa hai tài khoản được tính Elo."), COL_DIM, 12, 488))
 
-	box.add_child(_label(Loc.t("PHÒNG ĐANG MỞ"), 11, COL_DIM))
+	box.add_child(_label(Loc.t("PHÒNG CỦA BẠN BÈ (KHÔNG TÍNH ELO)"), 11, COL_DIM))
 	_rooms_empty = _para(Loc.t("Chưa có phòng nào."), COL_DIM, 14, 488)
 	box.add_child(_rooms_empty)
 	_rooms_scroll = ScrollContainer.new()
@@ -976,8 +1034,7 @@ func _build_rooms_card() -> void:
 	_rooms_scroll.add_child(_room_list)
 	box.add_child(_rooms_scroll)
 
-	box.add_child(_label(Loc.t("HOẶC TẠO PHÒNG RIÊNG · ĐỘ KHÓ"), 11, COL_DIM))
-	_build_picker(box, 488)
+	box.add_child(_label(Loc.t("HOẶC TẠO PHÒNG RIÊNG (THEO ĐỘ KHÓ Ở TRÊN)"), 11, COL_DIM))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	_room_name_edit = LineEdit.new()
@@ -1129,6 +1186,146 @@ func _slider(lo: float, hi: float, step: float) -> HSlider:
 	return sl
 
 
+## Who you are online: an account (rated) or a guest.
+func _refresh_rooms_who() -> void:
+	if Account.logged_in():
+		_rooms_who.text = Loc.t("Bạn chơi bằng tài khoản %s · Elo %d.") % [Account.user["name"], int(Account.user.get("rating", 0))]
+	else:
+		_rooms_who.text = Loc.t("Bạn đang chơi với tư cách khách (%s). Đăng nhập ở menu chính để được tính Elo.") % Net.player_name
+
+
+func _build_search_card() -> void:
+	var box := _make_card("search", 520)
+	_header(box, Loc.t("Đang tìm đối thủ…"), Loc.t("Hủy"), func() -> void: cancel_find_requested.emit())
+	_search_info = _label("", 18)
+	box.add_child(_search_info)
+	_search_others = _para("", COL_MUTED, 14, 448)
+	box.add_child(_search_others)
+	_search_rated = _para("", COL_DIM, 13, 448)
+	box.add_child(_search_rated)
+
+
+func _update_search_time() -> void:
+	var secs := int(Time.get_ticks_msec() / 1000.0 - _search_since)
+	_search_info.text = Loc.t("%s · đã chờ %d:%02d") % [Loc.t(Rules.DIFF_NAMES[Prefs.difficulty]), secs / 60, secs % 60]
+
+
+## Menu: a guest types a display name; a logged-in player sees their account and record.
+func _refresh_account_box() -> void:
+	for c in _account_box.get_children():
+		c.queue_free()
+	if Account.logged_in():
+		var u := Account.user
+		_account_box.add_child(_label(Loc.t("TÀI KHOẢN"), 11, COL_DIM))
+		_account_box.add_child(_label(str(u["name"]), 24))
+		var rating := int(u.get("rating", 0))
+		var record := Loc.t("Elo %d · %d thắng · %d thua · %d hòa") % [rating, int(u.get("wins", 0)), int(u.get("losses", 0)), int(u.get("draws", 0))] \
+			if rating > 0 else Loc.t("Đang tải thành tích…")
+		_account_box.add_child(_label(record, 13, COL_ACCENT))
+		var out := _button(Loc.t("Đăng xuất"), false)
+		out.custom_minimum_size = Vector2(0, 38)
+		out.pressed.connect(func() -> void: Account.logout())
+		_account_box.add_child(out)
+		return
+	_account_box.add_child(_label(Loc.t("TÊN CỦA BẠN (KHÁCH)"), 11, COL_DIM))
+	_name_edit = LineEdit.new()
+	_name_edit.text = Net.player_name
+	_name_edit.max_length = 16
+	_name_edit.placeholder_text = Loc.t("Nhập tên hiển thị")
+	_name_edit.text_changed.connect(func(_t: String) -> void: _commit_name())
+	_style_edit(_name_edit)
+	_account_box.add_child(_name_edit)
+	var acc := _button(Loc.t("Đăng nhập / Tạo tài khoản"), false)
+	acc.custom_minimum_size = Vector2(0, 40)
+	acc.pressed.connect(show_account)
+	_account_box.add_child(acc)
+
+
+func _on_account_changed() -> void:
+	if Account.logged_in():
+		Net.player_name = str(Account.user["name"])
+		_acc_pass.text = ""
+		_acc_pass2.text = ""
+	_refresh_account_box()
+	if _current == "account" and Account.logged_in():
+		show_menu()
+	elif _current == "rooms":
+		_refresh_rooms_who()
+
+
+func _build_account_card() -> void:
+	var box := _make_card("account", 520)
+	_header(box, Loc.t("Tài khoản"), Loc.t("Quay lại"), func() -> void: show_menu())
+	box.add_child(_para(Loc.t("Có tài khoản thì không ai dùng được tên của bạn, và các trận tìm qua «Tìm trận» được tính Elo, thắng, thua. Không đăng nhập vẫn chơi được như khách."), COL_MUTED, 13, 448))
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 8)
+	_acc_tabs.clear()
+	for i in 2:
+		var b := _button(Loc.t("Đăng nhập") if i == 0 else Loc.t("Tạo tài khoản"), false)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size = Vector2(0, 40)
+		b.pressed.connect(func() -> void: _set_account_mode(i == 1))
+		tabs.add_child(b)
+		_acc_tabs.append(b)
+	box.add_child(tabs)
+	box.add_child(_label(Loc.t("TÊN ĐĂNG NHẬP"), 11, COL_DIM))
+	_acc_name = LineEdit.new()
+	_acc_name.max_length = 16
+	_acc_name.placeholder_text = Loc.t("3–16 ký tự: chữ không dấu, số, _ hoặc .")
+	_style_edit(_acc_name)
+	box.add_child(_acc_name)
+	box.add_child(_label(Loc.t("MẬT KHẨU"), 11, COL_DIM))
+	_acc_pass = LineEdit.new()
+	_acc_pass.secret = true
+	_acc_pass.max_length = 72
+	_style_edit(_acc_pass)
+	box.add_child(_acc_pass)
+	_acc_pass2_label = _label(Loc.t("NHẬP LẠI MẬT KHẨU"), 11, COL_DIM)
+	box.add_child(_acc_pass2_label)
+	_acc_pass2 = LineEdit.new()
+	_acc_pass2.secret = true
+	_acc_pass2.max_length = 72
+	_style_edit(_acc_pass2)
+	box.add_child(_acc_pass2)
+	_acc_status = _para("", Color("ffb199"), 14, 448)
+	box.add_child(_acc_status)
+	_acc_go = _button(Loc.t("Đăng nhập"))
+	_acc_go.custom_minimum_size = Vector2(0, 50)
+	_acc_go.pressed.connect(_submit_account)
+	box.add_child(_acc_go)
+	for e in [_acc_name, _acc_pass, _acc_pass2]:
+		(e as LineEdit).text_submitted.connect(func(_t: String) -> void: _submit_account())
+	_set_account_mode(false)
+
+
+func _set_account_mode(register: bool) -> void:
+	_acc_register = register
+	for i in _acc_tabs.size():
+		_style_button(_acc_tabs[i], (i == 1) == register)
+	_acc_pass2_label.visible = register
+	_acc_pass2.visible = register
+	_acc_go.text = Loc.t("Tạo tài khoản") if register else Loc.t("Đăng nhập")
+	_acc_status.text = ""
+
+
+func _submit_account() -> void:
+	if Account.busy:
+		return
+	var n := _acc_name.text.strip_edges()
+	if n == "" or _acc_pass.text == "":
+		_acc_status.text = Loc.t("Nhập tên đăng nhập và mật khẩu.")
+		return
+	if _acc_register and _acc_pass.text != _acc_pass2.text:
+		_acc_status.text = Loc.t("Hai mật khẩu không khớp.")
+		return
+	_acc_status.text = Loc.t("Đang xử lý…")
+	_acc_go.disabled = true
+	if _acc_register:
+		Account.register(n, _acc_pass.text)
+	else:
+		Account.login(n, _acc_pass.text)
+
+
 func _build_wait_card() -> void:
 	var box := _make_card("wait", 560)
 	_header(box, Loc.t("Phòng chơi"), Loc.t("Rời phòng"), func() -> void: leave_requested.emit())
@@ -1160,6 +1357,9 @@ func _build_over_card() -> void:
 	box.add_child(_over_title)
 	_over_sub = _para("", COL_MUTED, 15, 388)
 	box.add_child(_over_sub)
+	_over_rating = _label("", 20, COL_ACCENT)
+	_over_rating.visible = false
+	box.add_child(_over_rating)
 	_rematch_btn = _button(Loc.t("Chơi lại"))
 	_rematch_btn.pressed.connect(func() -> void: rematch_requested.emit())
 	box.add_child(_rematch_btn)

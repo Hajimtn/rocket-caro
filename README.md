@@ -66,7 +66,7 @@ Phím `1` thường · `2` tẩy · `3` đuổi · `4` băng (chọn trong lư�
 Lưu ý: itch chỉ lưu file tĩnh, nên bản itch chơi online qua máy chủ công khai `wss://super-caro.kembabies.io.vn` (`Net.PUBLIC_SERVER`); máy chủ đó tắt thì bản itch chỉ còn chơi với Bot và 2 người cùng máy. Muốn dùng máy chủ khác: chạy `godot --headless -- --server` sau một reverse proxy có HTTPS hỗ trợ WebSocket (xem `deploy/`) rồi nhập `wss://ten-mien` trong màn kết nối.
 
 ## Chơi online: super-caro.kembabies.io.vn
-`./deploy/deploy.sh` chạy test luật, export bản web ở máy này, rsync lên VPS `<VPS_IP>` (`/home/deploy/kembabies/super-caro`) rồi `docker compose up -d --build`. Hai container: `super-caro-web` (nginx phục vụ file tĩnh đã nén gzip, `127.0.0.1:8792`; request có `Upgrade: websocket` được chuyển sang trọng tài) và `super-caro-game` (Godot 4.7.2 headless chạy `--server` từ chính `index.pck` vừa export, nên client và server luôn cùng phiên bản). Host Nginx giữ TLS. Vhost: `deploy/super-caro.kembabies.io.vn.conf` (cài một lần bằng sudo, xem đầu file). `./deploy/deploy.sh ps | logs | restart` để vận hành. Bản trên itch.io cũng tự kết nối tới máy chủ này.
+`./deploy/deploy.sh` chạy test luật, export bản web ở máy này, rsync lên VPS `<VPS_IP>` (`/home/deploy/kembabies/super-caro`) rồi `docker compose up -d --build`. Ba container: `super-caro-accounts` (tài khoản, xem mục *Tài khoản và tìm trận*), `super-caro-web` (nginx phục vụ file tĩnh đã nén gzip, `127.0.0.1:8792`; request có `Upgrade: websocket` được chuyển sang trọng tài) và `super-caro-game` (Godot 4.7.2 headless chạy `--server` từ chính `index.pck` vừa export, nên client và server luôn cùng phiên bản). Host Nginx giữ TLS. Vhost: `deploy/super-caro.kembabies.io.vn.conf` (cài một lần bằng sudo, xem đầu file). `./deploy/deploy.sh ps | logs | restart` để vận hành. Bản trên itch.io cũng tự kết nối tới máy chủ này.
 
 ## Điều khiển
 Chuột ngắm · click/Space bắn · chuột phải/Z zoom · 1–4 chọn đạn · mũi tên cũng ngắm · Esc tạm dừng.
@@ -82,6 +82,14 @@ Dấu, hiệu ứng nổ và vệt đường bay đi theo trận: máy khách g�
 
 ## Màn hình tải (web)
 `web/shell.html` thay trang tải mặc định của Godot (logo + thanh tiến trình trơn) bằng màn hình Rocket Caro: bàn caro nhỏ tự xếp 5 ô, rocket bay, thanh tiến trình có số MB, tự chọn tiếng Việt/Anh theo trình duyệt, tắt chuyển động khi hệ thống bật "giảm chuyển động". Boot splash của engine đã tắt (`application/boot_splash/show_image=false`) nên không còn logo Godot sau khi tải xong.
+
+## Tài khoản và tìm trận
+- **Tài khoản** (không bắt buộc): menu chính → *Đăng nhập / Tạo tài khoản*. Tên đăng nhập 3–16 ký tự `[A-Za-z0-9_.]`, mật khẩu 6–72 ký tự. Dịch vụ `backend/accounts.py` (Python, chỉ thư viện chuẩn, SQLite) băm mật khẩu bằng scrypt, chặn dò mật khẩu theo IP, và cấp **token** = `base64(json {uid, name, exp}) + "." + hex(HMAC-SHA256)`, hạn 30 ngày, lưu trong `Prefs`. Client (`scripts/core/account.gd`, autoload `Account`) gọi `/api/register`, `/api/login`, `/api/me`.
+- Vào sảnh online, client gửi token cho trọng tài (`Lobby.srv_auth`). Trọng tài tự kiểm chữ ký bằng cùng khóa `RC_AUTH_SECRET`, nên tên hiển thị của người có tài khoản không giả được. Không có khóa (máy chủ LAN) thì ai cũng là khách.
+- **Tìm trận** (sảnh online): ghép người đang tìm **cùng độ khó**, ưu tiên Elo gần nhau; ai chờ lâu thì nới dần khoảng Elo (100 + 25 mỗi giây). Hai tab của cùng một tài khoản không ghép với nhau. Phòng do tìm trận tạo ra là phòng riêng (không hiện trong danh sách).
+- **Elo**: chỉ tính khi **cả hai** đều đăng nhập và trận đến từ *Tìm trận* (phòng bạn bè không tính). Bắt đầu 1000, K = 32. Rời trận khi đang đấu bị tính thua. Trọng tài báo kết quả cho dịch vụ qua API nội bộ (`/internal/match`, header `X-Internal-Key`, chỉ trong mạng Docker); màn kết thúc trận hiện `Elo 1000 → 1016 (+16)`. Bảng xếp hạng: `GET /api/top`.
+- Test: `python3 tools/test_accounts.py`. Thử cả hệ thống trên máy: chạy `backend/accounts.py` với `RC_AUTH_SECRET`, trọng tài với `RC_AUTH_SECRET` + `RC_AUTH_URL`, rồi client `-- --api=http://127.0.0.1:PORT --login=ten:matkhau --autofind=127.0.0.1:CONG`.
+- Trên VPS: container `super-caro-accounts`, dữ liệu trong volume `accounts-data`; khóa nằm trong `.env` trên VPS, `deploy.sh` tự tạo lần đầu và không bao giờ đồng bộ. `./deploy/deploy.sh backup` kéo bản sao database về `backups/` trên máy này.
 
 ## Điện thoại
 Chạm màn hình là game chuyển sang điều khiển cảm ứng (`scripts/ui/touch_controls.gd`); dùng lại chuột thật thì quay về khóa chuột như cũ. Trên trình duyệt Android/iOS thì bật sẵn từ đầu.

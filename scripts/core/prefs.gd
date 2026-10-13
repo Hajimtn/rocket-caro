@@ -13,6 +13,7 @@ var language := "vi"       ## "vi" or "en"
 var hide_warning := false   ## skip the health-warning screen at start-up
 var difficulty := Rules.DIFF_HARD   ## last chosen difficulty (offline games and rooms you create)
 var skins := Skins.defaults()       ## chosen cosmetics, see Skins
+var token := ""                     ## account login (see Account); empty when playing as a guest
 
 
 func _ready() -> void:
@@ -30,6 +31,7 @@ func _ready() -> void:
 		if language not in Loc.LANGS:
 			language = "vi"
 		hide_warning = bool(cfg.get_value("ui", "hide_warning", false))
+		token = str(cfg.get_value("account", "token", ""))
 		difficulty = clampi(int(cfg.get_value("game", "difficulty", Rules.DIFF_HARD)), 0, Rules.DIFF_INSANE)
 	apply_volume()
 
@@ -49,6 +51,7 @@ func save() -> void:
 	cfg.set_value("game", "difficulty", difficulty)
 	cfg.set_value("ui", "language", language)
 	cfg.set_value("ui", "hide_warning", hide_warning)
+	cfg.set_value("account", "token", token)
 	for kind in Skins.KINDS:
 		cfg.set_value("skins", kind, skins[kind])
 	cfg.save(PATH)

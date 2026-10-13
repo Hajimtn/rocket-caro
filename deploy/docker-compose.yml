@@ -1,8 +1,12 @@
 name: super-caro
 
-# web:  nginx phục vụ bản web export, và chuyển mọi kết nối WebSocket sang `game`.
-# game: Godot headless chạy trọng tài (--server) từ CHÍNH file .pck của bản web
-#       vừa export, nên client và server luôn cùng phiên bản.
+# web:      nginx phục vụ bản web export; chuyển WebSocket sang `game` và /api/ sang `accounts`.
+# game:     Godot headless chạy trọng tài (--server) từ CHÍNH file .pck của bản web
+#           vừa export, nên client và server luôn cùng phiên bản.
+# accounts: tài khoản + Elo (backend/accounts.py, SQLite trong volume).
+#
+# RC_AUTH_SECRET nằm trong .env cạnh file này trên VPS (deploy.sh tự tạo lần đầu, không bao
+# giờ rời VPS). accounts dùng nó để ký token, game dùng để kiểm chữ ký và gọi API nội bộ.
 services:
   web:
     build:
@@ -10,7 +14,7 @@ services:
       dockerfile: web.Dockerfile
     container_name: super-caro-web
     restart: unless-stopped
-    depends_on: [game]
+    depends_on: [game, accounts]
     ports:
       - "127.0.0.1:8792:80"     # chỉ nginx của host vào được
     logging:
@@ -24,6 +28,27 @@ services:
     container_name: super-caro-game
     restart: unless-stopped
     expose: ["24571"]           # chỉ trong mạng compose, không mở ra host
+    environment:
+      RC_AUTH_SECRET: ${RC_AUTH_SECRET:?thiếu RC_AUTH_SECRET trong .env}
+      RC_AUTH_URL: http://accounts:8000
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
+
+  accounts:
+    build:
+      context: .
+      dockerfile: accounts.Dockerfile
+    container_name: super-caro-accounts
+    restart: unless-stopped
+    expose: ["8000"]
+    environment:
+      RC_AUTH_SECRET: ${RC_AUTH_SECRET:?thiếu RC_AUTH_SECRET trong .env}
+    volumes:
+      - accounts-data:/data     # không có dòng này là mỗi lần deploy mất hết tài khoản
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  accounts-data:

@@ -5,13 +5,14 @@
 # bind 127.0.0.1, ảnh dựng ngay trên VPS).
 #
 # Bản web được export Ở MÁY NÀY (cần Godot + export template web), rồi đẩy lên.
-# Trên VPS chỉ còn: nginx phục vụ file tĩnh, và Godot headless chạy trọng tài từ
-# chính file .pck đó.
+# Trên VPS: nginx phục vụ file tĩnh, Godot headless chạy trọng tài từ chính file
+# .pck đó, và dịch vụ tài khoản (Python + SQLite trong volume).
 #
-# Dùng:  ./deploy/deploy.sh            test luật, export, đẩy lên, khởi động lại
-#        ./deploy/deploy.sh logs       xem log (trọng tài + nginx)
+# Dùng:  ./deploy/deploy.sh            test, export, đẩy lên, khởi động lại
+#        ./deploy/deploy.sh logs       xem log
 #        ./deploy/deploy.sh ps         trạng thái container
 #        ./deploy/deploy.sh restart
+#        ./deploy/deploy.sh backup     kéo database tài khoản VỀ MÁY NÀY
 set -euo pipefail
 
 VPS="${VPS_USER:-deploy}@${VPS_HOST:-<VPS_IP>}"
@@ -33,6 +34,9 @@ cmd_deploy() {
   echo "==> Test luật"
   "$GODOT" --headless --path "$LOCAL" --script tools/test_rules.gd 2>&1 | tail -1 | grep -q "RESULT: OK" \
     || die "tools/test_rules.gd không qua. Chạy tay để xem lỗi."
+  echo "==> Test tài khoản"
+  python3 "$LOCAL/tools/test_accounts.py" | tail -1 | grep -q "RESULT: OK" \
+    || die "tools/test_accounts.py không qua. Chạy tay để xem lỗi."
 
   echo "==> Export bản web"
   rm -rf "$STAGE"
@@ -41,13 +45,19 @@ cmd_deploy() {
   for f in index.html index.js index.wasm index.pck; do
     [ -s "$STAGE/site/$f" ] || die "Export thiếu $f (đã cài export template Web cho Godot chưa?)"
   done
-  cp "$LOCAL"/deploy/{docker-compose.yml,web.Dockerfile,game.Dockerfile,nginx.conf} "$STAGE/"
+  cp "$LOCAL"/deploy/{docker-compose.yml,web.Dockerfile,game.Dockerfile,accounts.Dockerfile,nginx.conf} "$STAGE/"
+  cp "$LOCAL/backend/accounts.py" "$STAGE/"
 
   echo "==> rsync lên $VPS:$REMOTE"
   ssh "$VPS" "mkdir -p '$REMOTE'"
   # --stats chứ không phải --info=stats1: macOS ship openrsync (tương thích
   # rsync 2.6.9), không hiểu cờ --info của rsync 3.x.
-  rsync -az --delete --stats "$STAGE/" "$VPS:$REMOTE/" | grep -E "^(Number of files|Total transferred)" || true
+  # .env (khóa bí mật) sống trên VPS: --delete không được đụng tới nó.
+  rsync -az --delete --stats --exclude '.env' "$STAGE/" "$VPS:$REMOTE/" | grep -E "^(Number of files|Total transferred)" || true
+
+  # Lần đầu: tạo khóa ký token ngay trên VPS. Nó không bao giờ đi qua máy này hay git.
+  # (Đổi khóa = mọi người phải đăng nhập lại; tài khoản thì vẫn còn.)
+  ssh "$VPS" "cd '$REMOTE' && { [ -s .env ] || { umask 077; printf 'RC_AUTH_SECRET=%s\n' \"\$(openssl rand -hex 32)\" > .env; echo '   đã tạo .env (RC_AUTH_SECRET mới)'; }; }"
 
   echo "==> Build + up"
   dc "up -d --build --remove-orphans"
@@ -59,7 +69,8 @@ cmd_deploy() {
     printf '   trang web: '; curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:$PORT/; \
     printf '   websocket: '; curl -s -o /dev/null -w '%{http_code}\n' --max-time 3 --http1.1 \
       -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
-      -H 'Sec-WebSocket-Key: cm9ja2V0LWNhcm8tdGVzdA==' http://127.0.0.1:$PORT/ || true"
+      -H 'Sec-WebSocket-Key: cm9ja2V0LWNhcm8tdGVzdA==' http://127.0.0.1:$PORT/ || true; \
+    printf '   tài khoản: '; curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:$PORT/api/top"
 
   ssh "$VPS" "docker image prune -f >/dev/null"
   cat <<MSG
@@ -72,10 +83,24 @@ Lần đầu cần vhost + HTTPS trên host Nginx (cần sudo), xem deploy/super
 MSG
 }
 
+# Bản sao nằm ở MÁY KHÁC mới chống được mất ổ hay xoá nhầm volume trên VPS.
+cmd_backup() {
+  local dest="$LOCAL/backups" out
+  mkdir -p "$dest"
+  out="$dest/accounts-$(date +%Y%m%d-%H%M%S).db"
+  # sqlite3 .backup cho bản nhất quán kể cả khi đang có người đăng nhập / ghi Elo.
+  ssh "$VPS" "cd '$REMOTE' && docker compose exec -T accounts python -c \
+    'import sqlite3,sys; s=sqlite3.connect(\"/data/accounts.db\"); d=sqlite3.connect(\"/tmp/b.db\"); s.backup(d); d.close(); sys.stdout.buffer.write(open(\"/tmp/b.db\",\"rb\").read())' \
+    && docker compose exec -T accounts rm -f /tmp/b.db" > "$out"
+  [ -s "$out" ] || { rm -f "$out"; die "Sao lưu HỎNG: không lấy được dữ liệu. Container accounts có đang chạy không?"; }
+  echo "$out  ($(du -h "$out" | cut -f1))"
+}
+
 case "${1:-deploy}" in
   deploy)  cmd_deploy ;;
+  backup)  cmd_backup ;;
   logs)    dc "logs -f --tail=100" t ;;
   ps)      dc "ps" ;;
   restart) dc "restart" ;;
-  *) die "Không hiểu lệnh '$1'. Dùng: deploy | logs | ps | restart" ;;
+  *) die "Không hiểu lệnh '$1'. Dùng: deploy | logs | ps | restart | backup" ;;
 esac

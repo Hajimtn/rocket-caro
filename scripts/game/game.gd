@@ -10,6 +10,7 @@ extends Node3D
 signal room_changed            ## server: who is in the room / whether a match runs changed
 signal room_empty              ## server: the last player left
 signal player_left(peer: int)  ## server: a player left this room (peer id)
+signal match_result(winner: int)  ## server: a game ended, 1 = X won, 2 = O won, 3 = draw (walking out loses)
 
 enum Mode { BOT, LOCAL, ONLINE }
 enum Phase { IDLE, AIMING, FLYING, RESULT, OVER }
@@ -32,6 +33,7 @@ var is_host := true
 var server_only := false   ## headless referee room: runs the match but has no player
 var room_id := 0
 var room_name := ""
+var ranked := false        ## server: a room made by matchmaking (private; rated when both players have accounts)
 var lobby: Lobby           ## client side
 var my_team := 1
 var team := 1
@@ -65,6 +67,7 @@ var _result_in := 0.0
 var _pending: Dictionary = {}
 var _flight_left := 0.0
 var _autoplay := false
+var _autofind := false   ## test only: look for a match instead of joining any room
 var _last_tick := -1
 var _auto_fired := false
 var _no_pause := false
@@ -87,6 +90,7 @@ var _steer_send := 0.0
 var _auto_target := Vector3(INF, INF, INF)
 var _slots := {1: 0, 2: 0}        ## server: team -> peer id
 var _slot_names := {1: "", 2: ""}
+var _slot_uids := {1: 0, 2: 0}    ## server: account id per seat, 0 for a guest
 var _slot_skins := {1: Skins.defaults(), 2: Skins.defaults()}
 var _reserved := {}               ## server: peers told to join but not yet seated
 var _room_label := ""           ## client: name of the room we are in
@@ -134,6 +138,20 @@ func bind_ui(u: Ui) -> void:
 	ui.refresh_rooms_requested.connect(func() -> void: lobby.request_list())
 	lobby.rooms_updated.connect(ui.set_room_list)
 	lobby.notice.connect(ui.set_rooms_status)
+	ui.find_requested.connect(func() -> void: lobby.request_find())
+	ui.cancel_find_requested.connect(func() -> void: lobby.request_cancel_find())
+	lobby.search_changed.connect(func(on: bool, waiting: int) -> void:
+		if on:
+			ui.show_search(waiting)
+		elif ui.current_card() == "search":
+			ui.show_rooms())
+	lobby.authed.connect(func(ok: bool, reason: String) -> void:
+		if not ok and reason == "invalid":   # expired or revoked: carry on as a guest
+			Account.logout()
+			ui.set_rooms_status(Loc.t("Phiên đăng nhập đã hết hạn, bạn đang chơi với tư cách khách. Hãy đăng nhập lại.")))
+	lobby.rating_changed.connect(func(before: int, after: int) -> void:
+		ui.set_rating_change(before, after)
+		Account.refresh())
 	ui.rematch_requested.connect(func() -> void:
 		if mode == Mode.ONLINE:
 			srv_rematch.rpc_id(1)
@@ -150,11 +168,16 @@ func bind_ui(u: Ui) -> void:
 
 ## Developer shortcuts for scripted multi-process tests (pass after `--`).
 func run_cli(args: PackedStringArray) -> void:
+	var login := ""
 	for a in args:
 		if a.begins_with("--tilt="):
 			_force_tilt = Vector2(float(a.get_slice("=", 1).get_slice(",", 0)), float(a.get_slice("=", 1).get_slice(",", 1)))
 		if a.begins_with("--diff="):
 			Prefs.difficulty = clampi(int(a.get_slice("=", 1)), 0, Rules.DIFF_INSANE)   # test only: not saved
+		if a.begins_with("--api="):
+			Account.api_override = a.get_slice("=", 1)
+		if a.begins_with("--login="):   # name:password, logged in before --autofind connects
+			login = a.get_slice("=", 1)
 	for a in args:
 		if a == "--autoplay":
 			_autoplay = true
@@ -174,6 +197,18 @@ func run_cli(args: PackedStringArray) -> void:
 		elif a.begins_with("--autojoin="):
 			_autoplay = true
 			_join(a.get_slice("=", 1))
+		elif a.begins_with("--autofind="):
+			_autoplay = true
+			_autofind = true
+			var address := a.get_slice("=", 1)
+			if login == "":
+				_join(address)
+			else:
+				Account.changed.connect(func() -> void: _join(address), CONNECT_ONE_SHOT)
+				Account.failed.connect(func(m: String) -> void:
+					print("[RC] login failed: ", m)
+					get_tree().quit(1), CONNECT_ONE_SHOT)
+				Account.login(login.get_slice(":", 0), login.get_slice(":", 1))
 		elif a.begins_with("--shot="):
 			var spec := a.get_slice("=", 1)   # path@seconds
 			var secs := float(spec.get_slice("@", 1)) if "@" in spec else 6.0
@@ -223,9 +258,15 @@ func _join(address: String) -> void:
 
 
 func _on_joined_host() -> void:
+	# Logged in? Prove it to the server before anything else (same reliable channel, so this
+	# arrives before any room or match request).
+	if Account.token != "":
+		lobby.request_auth(Account.token)
 	ui.show_rooms()
 	lobby.request_list()
-	if _autoplay:
+	if _autofind:
+		lobby.request_find()
+	elif _autoplay:
 		lobby.request_quick()
 
 
@@ -317,6 +358,15 @@ func _bcast(method: StringName, args: Array) -> void:
 	callv(method, args)
 
 
+## Account ids of the two seats (0 for a guest), and who sits where (peer id, 0 if empty).
+func seat_uids() -> Dictionary:
+	return _slot_uids.duplicate()
+
+
+func seat_peer(t: int) -> int:
+	return _slots[t]
+
+
 func seated() -> int:
 	return int(_slots[1] != 0) + int(_slots[2] != 0)
 
@@ -360,7 +410,10 @@ func srv_hello(guest_name: String, loadout: Dictionary) -> void:
 		net_reject.rpc_id(id, "Phòng đã đủ 2 người chơi.")
 		return
 	_slots[t] = id
-	_slot_names[t] = guest_name.strip_edges().substr(0, 16)
+	# A logged-in player is known by their account name; a guest by whatever they typed.
+	var acc: Dictionary = lobby.account(id) if lobby != null else {}
+	_slot_uids[t] = int(acc.get("uid", 0))
+	_slot_names[t] = str(acc["name"]) if acc.has("name") else guest_name.strip_edges().substr(0, 16)
 	if _slot_names[t] == "":
 		_slot_names[t] = GLYPH[t]
 	_slot_skins[t] = Skins.sanitize(loadout)
@@ -389,20 +442,31 @@ func srv_leave() -> void:
 
 
 func on_peer_gone(id: int) -> void:
+	var was_reserved := _reserved.has(id)
 	_reserved.erase(id)
 	var gone := 0
 	for k in [1, 2]:
 		if _slots[k] == id:
 			gone = k
-			_slots[k] = 0
 	if gone != 0:
+		var playing := phase == Phase.AIMING or phase == Phase.FLYING or phase == Phase.RESULT
+		if playing:
+			match_result.emit(3 - gone)   # walking out of a game loses it (only rated games care)
+		_slots[gone] = 0
 		_log("room %d: team %d left" % [room_id, gone])
 		_clear_match()
 		phase = Phase.IDLE
 		var other: int = _slots[3 - gone]
 		if other != 0:
-			net_wait.rpc_id(other, "Phòng «%s». Đối thủ đã thoát. Đang chờ người chơi mới…", [_room_title()])
+			if ranked:   # a matchmade room has no one else to wait for
+				net_reject.rpc_id(other, "Đối thủ đã rời trận, bạn được tính thắng." if playing else "Đối thủ đã rời phòng.")
+			else:
+				net_wait.rpc_id(other, "Phòng «%s». Đối thủ đã thoát. Đang chờ người chơi mới…", [_room_title()])
 		player_left.emit(id)
+	elif was_reserved and ranked:
+		for k in [1, 2]:   # matched, but the opponent never sat down
+			if _slots[k] != 0:
+				net_reject.rpc_id(_slots[k], "Đối thủ đã rời phòng.")
 	if seated() == 0 and _reserved.is_empty():
 		room_empty.emit()
 	else:
@@ -561,6 +625,8 @@ func _auth_finish_turn(res: Dictionary) -> void:
 		elif mark_count + 1 >= Rules.N * Rules.N:
 			win = 3
 	_bcast(&"net_result", [team, kind, r, c, win, flat, res.get("pos", Vector3.ZERO)])
+	if win != 0 and server_only:
+		match_result.emit(win)
 
 
 ## Test helper: aim like the bot would, sometimes with a special, via the normal fire path.
@@ -705,6 +771,7 @@ func net_new_match(name_x: String, name_o: String, new_difficulty: int, new_skin
 	if not server_only:
 		ui.hide_overlay()
 		ui.set_difficulty(difficulty)
+		ui.set_rating_change(0, 0)
 		rig.reset_for_turn(_view_team(1), Transform3D(Basis.IDENTITY, Rules.BOARD_ORIGIN), _start_z_for(difficulty))
 	_log("new match: %s vs %s [%s]" % [name_x, name_o, Rules.DIFF_NAMES[difficulty]])
 

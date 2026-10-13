@@ -18,6 +18,7 @@ boot_splash/bg_color=Color(0.043, 0.125, 0.153, 1)
 
 Prefs="*res://scripts/core/prefs.gd"
 Net="*res://scripts/core/net.gd"
+Account="*res://scripts/core/account.gd"
 
 [display]
 
