@@ -1,5 +1,5 @@
 #!/bin/bash
-# Starts everything needed to play Rocket Caro in the browser over the LAN:
+# Starts everything needed to play Caronado in the browser over the LAN:
 #   - a web server for the exported game (HTTPS for other machines, HTTP for this one)
 #   - the headless referee server that runs the matches (WebSocket, tunnelled through the same ports)
 # Both players open the printed URL; the first to arrive is X, the second is O.
@@ -28,7 +28,7 @@ distinguished_name = dn
 x509_extensions = v3
 prompt = no
 [dn]
-CN = Rocket Caro
+CN = Caronado
 [v3]
 subjectAltName = IP:$IP,IP:127.0.0.1,DNS:localhost
 CNF

@@ -8,7 +8,7 @@ signal join_failed      ## client: could not reach the server
 signal host_lost        ## client: the server went away
 
 const PORT := 24571
-const PUBLIC_SERVER := "wss://super-caro.kembabies.io.vn"   ## for pages without a server of their own (itch.io)
+const PUBLIC_SERVER := "wss://caronado.izy.io.vn"   ## for pages without a server of their own (itch.io)
 
 var player_name := ""
 var last_address := PUBLIC_SERVER

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static web server + WebSocket tunnel for Rocket Caro.
+"""Static web server + WebSocket tunnel for Caronado.
 
 Godot web builds need a secure context (HTTPS, or localhost) to run, so on the LAN the page has
 to be served over HTTPS. A page loaded from https:// may only open wss:// sockets, so this

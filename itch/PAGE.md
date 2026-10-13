@@ -1,7 +1,7 @@
 # Nội dung gợi ý cho trang itch.io
 
-**Title:** Rocket Caro
-**Project URL (slug):** rocket-caro
+**Title:** Caronado
+**Project URL (slug):** caronado
 **Short description / tagline (tối đa ~100 ký tự):**
 Caro khổng lồ 15×15, đặt dấu bằng rocket. Gió, trọng lực và cả bàn cờ đang lật quay sẽ làm bạn lệch tay.
 
@@ -13,7 +13,7 @@ Caro khổng lồ 15×15, đặt dấu bằng rocket. Gió, trọng lực và c�
 
 ## Mô tả (dán vào ô Description)
 
-**Rocket Caro**: caro 15×15 giữa hai bờ sông. Thay vì đánh dấu bằng chuột, bạn đứng ở một bên, ngắm và **bắn rocket** vào ô muốn đặt dấu. Xếp 5 dấu liên tiếp để thắng.
+**Caronado**: caro 15×15 giữa hai bờ sông. Thay vì đánh dấu bằng chuột, bạn đứng ở một bên, ngắm và **bắn rocket** vào ô muốn đặt dấu. Xếp 5 dấu liên tiếp để thắng.
 
 **Vì sao khó?**
 - Mỗi lượt chỉ có 15 giây và một phát bắn.
@@ -23,7 +23,7 @@ Caro khổng lồ 15×15, đặt dấu bằng rocket. Gió, trọng lực và c�
 - Hai đạn đặc biệt, mỗi loại dùng 1 lần mỗi ván: **đạn tẩy** xóa một dấu của đối thủ, **đạn đuổi** cho bạn lái rocket bằng chuột sau khi bắn.
 
 **Chế độ chơi (bản trên trang này):** chơi với Bot, hoặc 2 người thay phiên trên cùng một máy.
-**Chơi online**: game tự kết nối tới máy chủ công khai `wss://super-caro.kembabies.io.vn`, rủ bạn bè mở trang này là đấu được. Muốn chơi trong mạng LAN thì chạy máy chủ riêng (xem README).
+**Chơi online**: game tự kết nối tới máy chủ công khai `wss://caronado.izy.io.vn`, rủ bạn bè mở trang này là đấu được. Muốn chơi trong mạng LAN thì chạy máy chủ riêng (xem README).
 
 ## Điều khiển
 | | |

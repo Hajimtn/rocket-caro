@@ -22,6 +22,9 @@ const MAX_ROOMS := 64
 const PAIR_EVERY := 1.0       ## s between matchmaking passes
 const RATING_WINDOW := 100.0  ## Elo gap accepted at once...
 const WINDOW_GROWTH := 25.0   ## ...widening by this much per second of waiting
+## Cloudflare (and most proxies) drop a WebSocket that carries nothing for ~100 s; someone
+## sitting in the lobby or a waiting room sends nothing, so the server pings everyone.
+const KEEPALIVE := 25.0
 
 var is_server := false
 var game: Game   ## client side
@@ -32,6 +35,7 @@ var _next_id := 1
 var _accounts: Dictionary = {}    ## server: peer id -> {uid, name, rating}
 var _queue: Array[Dictionary] = []   ## server: {peer, uid, rating, diff, since}
 var _pair_in := 0.0
+var _ping_in := KEEPALIVE
 var _secret := ""
 var _auth_url := ""
 
@@ -53,7 +57,13 @@ func start_server(port: int) -> bool:
 
 
 func _process(delta: float) -> void:
-	if not is_server or _queue.is_empty():
+	if not is_server:
+		return
+	_ping_in -= delta
+	if _ping_in <= 0.0:
+		_ping_in = KEEPALIVE
+		lobby_ping.rpc()
+	if _queue.is_empty():
 		return
 	_pair_in -= delta
 	if _pair_in <= 0.0:
@@ -413,3 +423,9 @@ func lobby_search(on: bool, waiting: int) -> void:
 @rpc("authority", "call_remote", "reliable")
 func lobby_rating(before: int, after: int) -> void:
 	rating_changed.emit(before, after)
+
+
+## Keep-alive (see KEEPALIVE); nothing to do.
+@rpc("authority", "call_remote", "unreliable")
+func lobby_ping() -> void:
+	pass

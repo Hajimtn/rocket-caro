@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rocket Caro accounts: sign up, log in, Elo ratings. Python standard library only.
+"""Caronado accounts: sign up, log in, Elo ratings. Python standard library only.
 
 Public API (proxied under /api/ by the web container):
   POST /api/register  {"name", "password"}  -> {"token", "user"}

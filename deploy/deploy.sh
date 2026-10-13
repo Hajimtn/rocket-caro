@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 #
-# Deploy super-caro.kembabies.io.vn lên VPS <VPS_IP> (cùng pattern với
-# kembabies và caro-tournament: host Nginx giữ 80/443 + certbot, app chạy Docker
-# bind 127.0.0.1, ảnh dựng ngay trên VPS).
+# Deploy caronado.izy.io.vn lên VPS (app chạy Docker bind 127.0.0.1, ảnh dựng ngay
+# trên VPS; người chơi vào qua Cloudflare Tunnel nên không cần mở cổng nào).
+#
+# Địa chỉ VPS KHÔNG nằm trong repo (repo public): đặt trong deploy/local.env
+# (đã .gitignore), ví dụ:
+#   VPS_HOST=1.2.3.4
+#   VPS_USER=deploy
 #
 # Bản web được export Ở MÁY NÀY (cần Godot + export template web), rồi đẩy lên.
 # Trên VPS: nginx phục vụ file tĩnh, Godot headless chạy trọng tài từ chính file
@@ -13,18 +17,23 @@
 #        ./deploy/deploy.sh ps         trạng thái container
 #        ./deploy/deploy.sh restart
 #        ./deploy/deploy.sh backup     kéo database tài khoản VỀ MÁY NÀY
+#        ./deploy/deploy.sh tunnel     dán token Cloudflare Tunnel (một lần) và bật tunnel
 set -euo pipefail
 
-VPS="${VPS_USER:-deploy}@${VPS_HOST:-<VPS_IP>}"
-REMOTE=${REMOTE_BASE:-/home/deploy/kembabies}/super-caro
-SITE=super-caro.kembabies.io.vn
-PORT=8792
+die() { echo "!! $*" >&2; exit 1; }
 
 LOCAL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=/dev/null
+[ -f "$LOCAL/deploy/local.env" ] && . "$LOCAL/deploy/local.env"
+[ -n "${VPS_HOST:-}" ] || die "Chưa biết VPS ở đâu: tạo deploy/local.env với dòng VPS_HOST=<IP VPS> (xem đầu file này)."
+
+VPS="${VPS_USER:-deploy}@${VPS_HOST}"
+REMOTE=${REMOTE_BASE:-/home/deploy}/caronado
+SITE=caronado.izy.io.vn
+PORT=8793
+
 STAGE="$LOCAL/build/deploy"
 GODOT=${GODOT:-$(command -v godot || echo /Applications/Godot.app/Contents/MacOS/Godot)}
-
-die() { echo "!! $*" >&2; exit 1; }
 dc() { ssh ${2:+-t} "$VPS" "cd '$REMOTE' && docker compose $1"; }
 
 cmd_deploy() {
@@ -76,7 +85,7 @@ cmd_deploy() {
   cat <<MSG
 
 Xong.  https://$SITE
-Lần đầu cần vhost + HTTPS trên host Nginx (cần sudo), xem deploy/super-caro.kembabies.io.vn.conf.
+Truy cập qua Cloudflare Tunnel (TUNNEL_TOKEN + COMPOSE_PROFILES=tunnel trong .env trên VPS).
 
   ./deploy/deploy.sh ps       trạng thái container
   ./deploy/deploy.sh logs     xem log
@@ -96,11 +105,24 @@ cmd_backup() {
   echo "$out  ($(du -h "$out" | cut -f1))"
 }
 
+# Token đi thẳng từ bàn phím vào .env trên VPS qua ssh: không hiện ra màn hình, không nằm
+# trong lịch sử shell, không ghi ra file nào trên máy này.
+cmd_tunnel() {
+  local token
+  read -rsp "Dán TUNNEL_TOKEN (sẽ không hiện ra màn hình) rồi Enter: " token; echo
+  [ -n "$token" ] || die "Token rỗng."
+  printf '%s' "$token" | ssh "$VPS" "cd '$REMOTE' && umask 077 && t=\$(cat) \
+    && { grep -v -e '^TUNNEL_TOKEN=' -e '^COMPOSE_PROFILES=' .env || true; } > .env.new \
+    && printf 'TUNNEL_TOKEN=%s\nCOMPOSE_PROFILES=tunnel\n' \"\$t\" >> .env.new && mv .env.new .env \
+    && docker compose up -d tunnel && sleep 5 && docker compose logs --tail=15 tunnel"
+}
+
 case "${1:-deploy}" in
   deploy)  cmd_deploy ;;
+  tunnel)  cmd_tunnel ;;
   backup)  cmd_backup ;;
   logs)    dc "logs -f --tail=100" t ;;
   ps)      dc "ps" ;;
   restart) dc "restart" ;;
-  *) die "Không hiểu lệnh '$1'. Dùng: deploy | logs | ps | restart | backup" ;;
+  *) die "Không hiểu lệnh '$1'. Dùng: deploy | logs | ps | restart | backup | tunnel" ;;
 esac

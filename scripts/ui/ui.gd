@@ -440,7 +440,7 @@ func _build_rotate_hint() -> void:
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 16)
 	center.add_child(col)
-	var title := _label("ROCKET CARO.", 96, COL_ACCENT)
+	var title := _label("CARONADO.", 96, COL_ACCENT)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(title)
 	var text := _para(Loc.t("Xoay ngang điện thoại để chơi."), COL_TEXT, 64, 1000)
@@ -665,7 +665,7 @@ func _build_hud() -> void:
 	var brand := VBoxContainer.new()
 	brand.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	brand.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	brand.add_child(_label("ROCKET CARO.", 25, COL_TEXT))
+	brand.add_child(_label("CARONADO.", 25, COL_TEXT))
 	_brand_sub = _label("", 11, COL_MUTED)
 	brand.add_child(_brand_sub)
 	top.add_child(brand)
@@ -843,7 +843,7 @@ func _build_menu_card() -> void:
 	left.add_theme_constant_override("separation", 12)
 	cols.add_child(left)
 	left.add_child(_label(Loc.t("BẮN ROCKET · XẾP %d Ô") % Rules.WIN_LEN, 11, COL_ACCENT))
-	left.add_child(_label("Rocket Caro", 54))
+	left.add_child(_label("Caronado", 54))
 	left.add_child(_para(Loc.t("Bàn cờ %d×%d khổng lồ giữa hai bờ sông. Bắn rocket vào ô trống để đặt dấu; gió và trọng lực sẽ làm rocket lệch khỏi tâm ngắm.") % [Rules.N, Rules.N], COL_MUTED, 15, 330))
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1134,7 +1134,7 @@ func _build_warning_card() -> void:
 	var box := _make_card("warning", 720)
 	_language_row(box)
 	box.add_child(_label(Loc.t("Cảnh báo sức khỏe"), 34, Color("ffd9a0")))
-	box.add_child(_para(Loc.t("Rocket Caro là game góc nhìn thứ nhất với nhiều chuyển động mạnh: ở độ khó Rất khó chính bạn bị đưa đi vòng quanh bàn cờ liên tục, và ở độ khó Siêu khó bàn cờ lật, quay liên tục rất nhanh. Những hiệu ứng này có thể gây chóng mặt, buồn nôn, mỏi mắt hoặc đau đầu, đặc biệt với người dễ say tàu xe, người có vấn đề về tiền đình hoặc rối loạn thăng bằng."), COL_TEXT, 15, 648))
+	box.add_child(_para(Loc.t("Caronado là game góc nhìn thứ nhất với nhiều chuyển động mạnh: ở độ khó Rất khó chính bạn bị đưa đi vòng quanh bàn cờ liên tục, và ở độ khó Siêu khó bàn cờ lật, quay liên tục rất nhanh. Những hiệu ứng này có thể gây chóng mặt, buồn nôn, mỏi mắt hoặc đau đầu, đặc biệt với người dễ say tàu xe, người có vấn đề về tiền đình hoặc rối loạn thăng bằng."), COL_TEXT, 15, 648))
 	box.add_child(_label(Loc.t("ĐỂ CHƠI AN TOÀN HƠN"), 11, COL_ACCENT))
 	for tip in [
 		Loc.t("Bắt đầu với độ khó Bình thường hoặc Khó. Rất khó và Siêu khó gây chóng mặt nhiều nhất."),

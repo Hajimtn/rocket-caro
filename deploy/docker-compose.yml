@@ -1,22 +1,27 @@
-name: super-caro
+name: caronado
 
 # web:      nginx phục vụ bản web export; chuyển WebSocket sang `game` và /api/ sang `accounts`.
 # game:     Godot headless chạy trọng tài (--server) từ CHÍNH file .pck của bản web
 #           vừa export, nên client và server luôn cùng phiên bản.
 # accounts: tài khoản + Elo (backend/accounts.py, SQLite trong volume).
 #
-# RC_AUTH_SECRET nằm trong .env cạnh file này trên VPS (deploy.sh tự tạo lần đầu, không bao
-# giờ rời VPS). accounts dùng nó để ký token, game dùng để kiểm chữ ký và gọi API nội bộ.
+# tunnel:   Cloudflare Tunnel. Người chơi vào caronado.izy.io.vn qua Cloudflare, đường hầm này
+#           tự kết nối RA ngoài, nên DNS không chứa IP VPS và không cần mở cổng hay vhost nào.
+#
+# .env cạnh file này trên VPS (không bao giờ rời VPS, không đồng bộ từ máy local):
+#   RC_AUTH_SECRET   deploy.sh tự tạo lần đầu; accounts ký token, game kiểm chữ ký.
+#   TUNNEL_TOKEN     token của tunnel, lấy ở Cloudflare Zero Trust → Networks → Tunnels.
+#   COMPOSE_PROFILES=tunnel   bật container tunnel (không có dòng này thì tunnel không chạy).
 services:
   web:
     build:
       context: .
       dockerfile: web.Dockerfile
-    container_name: super-caro-web
+    container_name: caronado-web
     restart: unless-stopped
     depends_on: [game, accounts]
     ports:
-      - "127.0.0.1:8792:80"     # chỉ nginx của host vào được
+      - "127.0.0.1:8793:80"     # chỉ nginx của host vào được
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
@@ -25,7 +30,7 @@ services:
     build:
       context: .
       dockerfile: game.Dockerfile
-    container_name: super-caro-game
+    container_name: caronado-game
     restart: unless-stopped
     expose: ["24571"]           # chỉ trong mạng compose, không mở ra host
     environment:
@@ -39,13 +44,26 @@ services:
     build:
       context: .
       dockerfile: accounts.Dockerfile
-    container_name: super-caro-accounts
+    container_name: caronado-accounts
     restart: unless-stopped
     expose: ["8000"]
     environment:
       RC_AUTH_SECRET: ${RC_AUTH_SECRET:?thiếu RC_AUTH_SECRET trong .env}
     volumes:
       - accounts-data:/data     # không có dòng này là mỗi lần deploy mất hết tài khoản
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.3
+    container_name: caronado-tunnel
+    restart: unless-stopped
+    profiles: [tunnel]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on: [web]
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }

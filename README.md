@@ -1,4 +1,4 @@
-# Rocket Caro
+# Caronado
 
 Caro 15×15 bắn rocket, góc nhìn thứ nhất (Godot 4.7). Hai đội đứng hai bên một bàn cờ khổng lồ;
 mỗi lượt 15 giây, một phát bắn, gió + trọng lực làm lệch đường đạn. Đủ 5 dấu liên tiếp là thắng.
@@ -16,12 +16,12 @@ Mở thư mục này bằng Godot 4.7 rồi bấm Play (F5).
 ## Menu
 Màn hình chính chia hai cột: bên trái là tên bạn (tự lưu), *Cách chơi* và *Cài đặt* (độ nhạy chuột, âm lượng, lưu trên máy);
 bên phải là ba chế độ: *Chơi online*, *Chơi với Bot*, *2 người · cùng máy*. Mọi màn hình con đều có nút quay lại ở góc trên trái.
-Luồng online: Chọn skin → Sảnh phòng → phòng chờ/trận. Trên web game tự kết nối tới máy chủ (máy chủ đã phục vụ trang, hoặc `Net.PUBLIC_SERVER` = `wss://super-caro.kembabies.io.vn` khi chạy trên itch.io); màn nhập địa chỉ chỉ hiện ra khi kết nối lỗi, hoặc ở bản desktop.
+Luồng online: Chọn skin → Sảnh phòng → phòng chờ/trận. Trên web game tự kết nối tới máy chủ (máy chủ đã phục vụ trang, hoặc `Net.PUBLIC_SERVER` = `wss://caronado.izy.io.vn` khi chạy trên itch.io); màn nhập địa chỉ chỉ hiện ra khi kết nối lỗi, hoặc ở bản desktop.
 Cài đặt lưu ở `user://settings.cfg` (script `scripts/core/prefs.gd`).
 
 ## Chế độ chơi
 - **Đấu với bot** và **2 người · cùng máy** (offline, chạy được cả trên web).
-- **Chơi online** qua máy chủ công khai https://super-caro.kembabies.io.vn (xem mục bên dưới), hoặc tự dựng máy chủ trong mạng LAN (web hoặc desktop):
+- **Chơi online** qua máy chủ công khai https://caronado.izy.io.vn (xem mục bên dưới), hoặc tự dựng máy chủ trong mạng LAN (web hoặc desktop):
   1. Trên một máy trong mạng chạy `./play_lan.sh` (thêm `--rebuild` nếu vừa sửa code). Script bật
      web server HTTPS (cổng 8443) + HTTP cho chính máy này (cổng 8060) và server trọng tài
      (WebSocket nội bộ cổng 24571, được tunnel qua chính cổng web), rồi in ra URL.
@@ -60,13 +60,17 @@ Phím `1` thường · `2` tẩy · `3` đuổi · `4` băng (chọn trong lư�
 - HUD trên cùng hiển thị gió (mũi tên theo hướng *màn hình của bạn*) và trọng lực.
 
 ## Đăng lên itch.io
-1. `./export_itch.sh` tạo `build/itch/rocket-caro-web.zip` (khoảng 10 MB, `index.html` nằm ở gốc zip).
+1. `./export_itch.sh` tạo `build/itch/caronado-web.zip` (khoảng 10 MB, `index.html` nằm ở gốc zip).
 2. itch.io → *Upload new project*: Kind of project = **HTML**, tải zip lên, tick *This file will be played in the browser*, viewport 1280×720, bật *Fullscreen button*.
 3. Ảnh bìa và ảnh chụp có sẵn trong `itch/`, nội dung trang trong `itch/PAGE.md`.
-Lưu ý: itch chỉ lưu file tĩnh, nên bản itch chơi online qua máy chủ công khai `wss://super-caro.kembabies.io.vn` (`Net.PUBLIC_SERVER`); máy chủ đó tắt thì bản itch chỉ còn chơi với Bot và 2 người cùng máy. Muốn dùng máy chủ khác: chạy `godot --headless -- --server` sau một reverse proxy có HTTPS hỗ trợ WebSocket (xem `deploy/`) rồi nhập `wss://ten-mien` trong màn kết nối.
+Lưu ý: itch chỉ lưu file tĩnh, nên bản itch chơi online qua máy chủ công khai `wss://caronado.izy.io.vn` (`Net.PUBLIC_SERVER`); máy chủ đó tắt thì bản itch chỉ còn chơi với Bot và 2 người cùng máy. Muốn dùng máy chủ khác: chạy `godot --headless -- --server` sau một reverse proxy có HTTPS hỗ trợ WebSocket (xem `deploy/`) rồi nhập `wss://ten-mien` trong màn kết nối.
 
-## Chơi online: super-caro.kembabies.io.vn
-`./deploy/deploy.sh` chạy test luật, export bản web ở máy này, rsync lên VPS `<VPS_IP>` (`/home/deploy/kembabies/super-caro`) rồi `docker compose up -d --build`. Ba container: `super-caro-accounts` (tài khoản, xem mục *Tài khoản và tìm trận*), `super-caro-web` (nginx phục vụ file tĩnh đã nén gzip, `127.0.0.1:8792`; request có `Upgrade: websocket` được chuyển sang trọng tài) và `super-caro-game` (Godot 4.7.2 headless chạy `--server` từ chính `index.pck` vừa export, nên client và server luôn cùng phiên bản). Host Nginx giữ TLS. Vhost: `deploy/super-caro.kembabies.io.vn.conf` (cài một lần bằng sudo, xem đầu file). `./deploy/deploy.sh ps | logs | restart` để vận hành. Bản trên itch.io cũng tự kết nối tới máy chủ này.
+## Chơi online: caronado.izy.io.vn
+`./deploy/deploy.sh` chạy test (luật + tài khoản), export bản web ở máy này, rsync lên VPS (`/home/deploy/caronado`) rồi `docker compose up -d --build`. Các container: `caronado-web` (nginx: file tĩnh nén gzip, chuyển `Upgrade: websocket` sang trọng tài và `/api/` sang tài khoản), `caronado-game` (Godot 4.7.2 headless chạy `--server` từ chính `index.pck` vừa export, nên client và server luôn cùng phiên bản), `caronado-accounts` (xem mục *Tài khoản và tìm trận*), và `caronado-tunnel`.
+
+**Không lộ IP VPS:** tên miền `izy.io.vn` dùng nameserver Cloudflare, và `caronado.izy.io.vn` đi qua **Cloudflare Tunnel** (`cloudflared` trong container `caronado-tunnel`, tự kết nối ra ngoài). DNS không có bản ghi nào chứa IP VPS, VPS không cần mở cổng hay vhost Nginx nào cho game, HTTPS do Cloudflare lo. Thiết lập một lần: Cloudflare Zero Trust → Networks → Tunnels → tạo tunnel (Cloudflared), public hostname `caronado.izy.io.vn` → `HTTP` `web:80`; rồi chạy `./deploy/deploy.sh tunnel` và dán token (ghi vào `.env` trên VPS cùng `COMPOSE_PROFILES=tunnel`). Cloudflare cắt WebSocket im lặng quá ~100 giây, nên trọng tài gửi `lobby_ping` mỗi 25 giây; IP thật của người chơi lấy từ `CF-Connecting-IP`. Đừng thêm bản ghi DNS nào trỏ thẳng về IP VPS (kể cả `MX`/`TXT` SPF chứa IP).
+
+`./deploy/deploy.sh ps | logs | restart | backup | tunnel` để vận hành.
 
 ## Điều khiển
 Chuột ngắm · click/Space bắn · chuột phải/Z zoom · 1–4 chọn đạn · mũi tên cũng ngắm · Esc tạm dừng.
@@ -81,7 +85,7 @@ Mỗi lần vào trận (Bot, 2 người, hoặc trước khi vào online) có m
 Dấu, hiệu ứng nổ và vệt đường bay đi theo trận: máy khách gửi kèm `srv_hello`, trọng tài lọc qua `Skins.sanitize` rồi phát trong `net_new_match`. Bot chọn ngẫu nhiên. Thêm skin: thêm một dòng vào bảng tương ứng (và vào `loc.gd` cho tên tiếng Anh). Test nhanh: `-- --skin=neon,star,fireworks,rainbow` (không lưu).
 
 ## Màn hình tải (web)
-`web/shell.html` thay trang tải mặc định của Godot (logo + thanh tiến trình trơn) bằng màn hình Rocket Caro: bàn caro nhỏ tự xếp 5 ô, rocket bay, thanh tiến trình có số MB, tự chọn tiếng Việt/Anh theo trình duyệt, tắt chuyển động khi hệ thống bật "giảm chuyển động". Boot splash của engine đã tắt (`application/boot_splash/show_image=false`) nên không còn logo Godot sau khi tải xong.
+`web/shell.html` thay trang tải mặc định của Godot (logo + thanh tiến trình trơn) bằng màn hình Caronado: bàn caro nhỏ tự xếp 5 ô, rocket bay, thanh tiến trình có số MB, tự chọn tiếng Việt/Anh theo trình duyệt, tắt chuyển động khi hệ thống bật "giảm chuyển động". Boot splash của engine đã tắt (`application/boot_splash/show_image=false`) nên không còn logo Godot sau khi tải xong.
 
 ## Tài khoản và tìm trận
 - **Tài khoản** (không bắt buộc): menu chính → *Đăng nhập / Tạo tài khoản*. Tên đăng nhập 3–16 ký tự `[A-Za-z0-9_.]`, mật khẩu 6–72 ký tự. Dịch vụ `backend/accounts.py` (Python, chỉ thư viện chuẩn, SQLite) băm mật khẩu bằng scrypt, chặn dò mật khẩu theo IP, và cấp **token** = `base64(json {uid, name, exp}) + "." + hex(HMAC-SHA256)`, hạn 30 ngày, lưu trong `Prefs`. Client (`scripts/core/account.gd`, autoload `Account`) gọi `/api/register`, `/api/login`, `/api/me`.
@@ -89,7 +93,7 @@ Dấu, hiệu ứng nổ và vệt đường bay đi theo trận: máy khách g�
 - **Tìm trận** (sảnh online): ghép người đang tìm **cùng độ khó**, ưu tiên Elo gần nhau; ai chờ lâu thì nới dần khoảng Elo (100 + 25 mỗi giây). Hai tab của cùng một tài khoản không ghép với nhau. Phòng do tìm trận tạo ra là phòng riêng (không hiện trong danh sách).
 - **Elo**: chỉ tính khi **cả hai** đều đăng nhập và trận đến từ *Tìm trận* (phòng bạn bè không tính). Bắt đầu 1000, K = 32. Rời trận khi đang đấu bị tính thua. Trọng tài báo kết quả cho dịch vụ qua API nội bộ (`/internal/match`, header `X-Internal-Key`, chỉ trong mạng Docker); màn kết thúc trận hiện `Elo 1000 → 1016 (+16)`. Bảng xếp hạng: `GET /api/top`.
 - Test: `python3 tools/test_accounts.py`. Thử cả hệ thống trên máy: chạy `backend/accounts.py` với `RC_AUTH_SECRET`, trọng tài với `RC_AUTH_SECRET` + `RC_AUTH_URL`, rồi client `-- --api=http://127.0.0.1:PORT --login=ten:matkhau --autofind=127.0.0.1:CONG`.
-- Trên VPS: container `super-caro-accounts`, dữ liệu trong volume `accounts-data`; khóa nằm trong `.env` trên VPS, `deploy.sh` tự tạo lần đầu và không bao giờ đồng bộ. `./deploy/deploy.sh backup` kéo bản sao database về `backups/` trên máy này.
+- Trên VPS: container `caronado-accounts`, dữ liệu trong volume `accounts-data`; khóa nằm trong `.env` trên VPS, `deploy.sh` tự tạo lần đầu và không bao giờ đồng bộ. `./deploy/deploy.sh backup` kéo bản sao database về `backups/` trên máy này.
 
 ## Điện thoại
 Chạm màn hình là game chuyển sang điều khiển cảm ứng (`scripts/ui/touch_controls.gd`); dùng lại chuột thật thì quay về khóa chuột như cũ. Trên trình duyệt Android/iOS thì bật sẵn từ đầu.
